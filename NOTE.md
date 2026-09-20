@@ -10,32 +10,32 @@ Daily log of what I learn, build, and debug while creating Remy — a fully loca
 **Duration:** ~3 hours
 **Difficulty:** 🟡 Medium
 
-### 🎯 Goal
+### Goal
 Set up Ollama and run the first LLM locally.
 
-### 📖 Concepts Learned
+### Concepts Learned
 - **LLM:** Large Language Model — the brain of the AI
 - **Ollama:** A runtime that runs LLMs locally on your machine
 - **Model:** A trained AI file (qwen2.5:7b = 7 billion parameters)
 - **brew vs pip:** brew installs applications, pip installs Python packages
 - **Service:** A program that runs continuously in the background
 
-### 🛠️ What I Did
+### What I Did
 - Installed Homebrew (`brew install`)
 - Installed Ollama (`brew install ollama`)
 - Started Ollama service (`brew services start ollama`)
 - Pulled qwen2.5:7b model (`ollama pull qwen2.5:7b`)
 - Tested the model from terminal
 
-### 🐛 Problems
+### Problems
 - `brew` not recognized → added to PATH
 - Mac froze (8GB RAM) → shortened `OLLAMA_KEEP_ALIVE`
 
-### ✅ Results
-- Turkish: ✅ Good
-- English: ✅ Good
-- Memory: ✅ Within session
-- Speed: ⚠️ A bit slow on 8GB RAM
+### Results
+- Turkish: Good
+- English: Good
+- Memory: Within session
+- Speed: A bit slow on 8GB RAM
 
 ---
 
@@ -45,27 +45,27 @@ Set up Ollama and run the first LLM locally.
 **Duration:** ~3 hours
 **Difficulty:** 🟢 Easy
 
-### 🎯 Goal
+### Goal
 Control Ollama from Python.
 
-### 📖 Concepts Learned
+### Concepts Learned
 - **venv:** Isolated Python environment
 - **`ollama.chat()`:** Sends messages to the model
 - **messages list:** Conversation history (memory)
 - **system prompt:** Defines Remy's personality
 - **role: system/user/assistant:** Who sent the message
 
-### 🛠️ What I Built
+### What I Built
 - `~/Desktop/MyProjects/remy` project folder
 - `venv` setup
 - `pip install ollama`
 - `remy.py` — chat loop with system prompt and memory
 
-### ✅ Results
-- Turkish: ✅
-- English: ✅
-- Same-session memory: ✅
-- Cross-session memory: ❌ (fixed in Day 3)
+### Results
+- Turkish: OK
+- English: OK
+- Same-session memory: OK
+- Cross-session memory: Not yet (fixed in Day 3)
 
 ---
 
@@ -75,10 +75,10 @@ Control Ollama from Python.
 **Duration:** ~5 hours
 **Difficulty:** 🟡 Medium
 
-### 🎯 Goal
+### Goal
 Make Remy remember conversations after restart.
 
-### 📖 Concepts Learned
+### Concepts Learned
 
 #### 1. What is SQLite?
 - File-based, serverless database
@@ -86,7 +86,7 @@ Make Remy remember conversations after restart.
 - Built into Python (`import sqlite3`)
 - Perfect for small/medium projects
 
-#### 2. Connection & Cursor
+#### 2. Connection and Cursor
 - `sqlite3.connect(DB_PATH)` → Opens/creates database
 - `con.cursor()` → Creates cursor
 - `con.commit()` → Saves changes
@@ -94,19 +94,17 @@ Make Remy remember conversations after restart.
 
 #### 3. Placeholders (`?`)
 - Safe way to pass values into SQL
-- Prevents **SQL Injection**
+- Prevents SQL Injection
 - Always tuple: `("value",)` not `("value")`
 
 #### 4. SQL Commands Used
-| Command | Purpose |
-|---------|---------|
-| `CREATE TABLE IF NOT EXISTS` | Creates table if not exists |
-| `INSERT INTO ... VALUES (?, ?)` | Adds row |
-| `INSERT OR REPLACE INTO ...` | Upsert |
-| `SELECT ... FROM ...` | Reads data |
-| `ORDER BY id DESC` | Newest first |
-| `LIMIT ?` | Limits results |
-| `WHERE key = ?` | Filters |
+- `CREATE TABLE IF NOT EXISTS` → Creates table if not exists
+- `INSERT INTO ... VALUES (?, ?)` → Adds row
+- `INSERT OR REPLACE INTO ...` → Upsert
+- `SELECT ... FROM ...` → Reads data
+- `ORDER BY id DESC` → Newest first
+- `LIMIT ?` → Limits results
+- `WHERE key = ?` → Filters
 
 #### 5. Fetch Methods
 - `fetchone()` → One result
@@ -116,7 +114,7 @@ Make Remy remember conversations after restart.
 #### 6. Upsert (`INSERT OR REPLACE`)
 - Updates if exists, inserts if not
 
-### 🛠️ What I Built
+### What I Built
 
 **File:** `src/memory/database.py`
 
@@ -125,13 +123,11 @@ Make Remy remember conversations after restart.
 - `facts` → id, key, value
 
 **Functions:**
-| Function | Purpose |
-|----------|---------|
-| `init_db()` | Creates both tables |
-| `save_message(role, content)` | Saves a message |
-| `get_messages(limit=10)` | Last N messages |
-| `save_fact(key, value)` | Saves/updates fact |
-| `get_fact(key)` | Returns value or None |
+- `init_db()` → Creates both tables
+- `save_message(role, content)` → Saves a message
+- `get_messages(limit=10)` → Last N messages
+- `save_fact(key, value)` → Saves/updates fact
+- `get_fact(key)` → Returns value or None
 
 **File:** `remy.py` (updated)
 - Imports from `src.memory.database`
@@ -139,8 +135,8 @@ Make Remy remember conversations after restart.
 - Loads last 10 messages
 - Saves every message
 
-### 🐛 Problems
-1. **`ImportError: cannot import name 'get_messages'`**
+### Problems
+1. **ImportError: cannot import name 'get_messages'**
    - Cause: Python cached `.pyc` files
    - Fix: `find . -type d -name "__pycache__" -exec rm -rf {} +`
 2. **`tutorial.py` instead of `test_db.py`**
@@ -148,13 +144,13 @@ Make Remy remember conversations after restart.
 3. **`tutorial.db` leftover**
    - Fix: `rm tutorial.db`
 
-### ✅ Results
-- Save/load messages: ✅
-- Save/load facts: ✅
-- Remembers after restart: ✅
-- SQL injection protection: ✅
+### Results
+- Save/load messages: OK
+- Save/load facts: OK
+- Remembers after restart: OK
+- SQL injection protection: OK
 
-### 💡 Key Takeaways
+### Key Takeaways
 1. SQLite is perfect for local apps
 2. Always use placeholders (`?`)
 3. Always `commit()`
@@ -170,13 +166,13 @@ Make Remy remember conversations after restart.
 **Duration:** ~5 hours
 **Difficulty:** 🟠 Hard
 
-### 🎯 Goal
+### Goal
 Make Remy hear the user via speech-to-text (STT).
 
-### 📖 Concepts Learned
+### Concepts Learned
 
 #### 1. What is STT?
-- **STT = Speech-to-Text**
+- STT = Speech-to-Text
 - Converts audio into text
 - Pipeline: Microphone → Audio file → STT model → Text
 
@@ -195,23 +191,21 @@ Make Remy hear the user via speech-to-text (STT).
 
 #### 4. VAD (Voice Activity Detection)
 - Detects speech start/end
-- Not used yet (Day 5)
+- Not used yet
 
 #### 5. Audio Formats
-| Format | Size (1 hour) | Quality |
-|--------|---------------|---------|
-| WAV | ~115 MB | 100% |
-| FLAC | ~60 MB | 100% (lossless) |
-| MP3 128k | ~57 MB | ~75% |
-| OGG 128k | ~57 MB | ~85% |
+- WAV: ~115 MB/hour, 100% quality
+- FLAC: ~60 MB/hour, 100% quality (lossless)
+- MP3 128k: ~57 MB/hour, ~75% quality
+- OGG 128k: ~57 MB/hour, ~85% quality
 
-**Why FLAC?** Lossless, ~50% smaller than WAV.
+Why FLAC? Lossless, ~50% smaller than WAV.
 
-#### 6. Sample Rate & Channels
+#### 6. Sample Rate and Channels
 - Whisper wants: 16 kHz, mono
 - Record at 16 kHz mono from the start
 
-### 🛠️ What I Built
+### What I Built
 
 **File:** `test_stt.py` (temporary, root directory)
 
@@ -223,68 +217,129 @@ Make Remy hear the user via speech-to-text (STT).
 5. Send to Groq Whisper
 6. Print text
 
-**Code:**
-```python
-import os
-import sounddevice as sd
-import soundfile as sf
-from groq import Groq
-from dotenv import load_dotenv
+### Libraries Used
+- `groq` → Groq API client
+- `sounddevice` → Microphone access
+- `soundfile` → Write audio to FLAC
+- `python-dotenv` → Load `.env`
 
-load_dotenv()
-api_key = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=api_key)
+Install: `pip install groq sounddevice soundfile python-dotenv`
 
-DURATION = 5
-SAMPLE_RATE = 16000
-CHANNELS = 1
-FILENAME = "test.flac"
+### Problems
+1. API key not visible → Groq keys shown once, create new
+2. `GROQ_API_KEY` not found → create `.env`
+3. `ModuleNotFoundError` → activate venv, install packages
+4. Microphone permission → System Settings → Privacy → Microphone
 
-def record_audio():
-    print(f"🎤 Recording... ({DURATION} seconds)")
-    recording = sd.rec(int(DURATION * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=CHANNELS)
-    sd.wait()
-    sf.write(FILENAME, recording, SAMPLE_RATE)
-    print("✅ Recording finished")
+### Results
+- Recording (5 sec): OK
+- FLAC save: OK
+- Groq upload: OK
+- Turkish transcription: OK
+- English transcription: OK
 
-def transcribe(filename):
-    print("📤 Sending to Groq...")
-    with open(filename, "rb") as file:
-        result = client.audio.transcriptions.create(
-            file=file,
-            model="whisper-large-v3-turbo",
-            language="tr",
-            response_format="text"
-        )
-    return result
+Example output:
+- Recording... (5 seconds)
+- Recording finished
+- Sending to Groq...
+- Text: merhaba ben remy
 
-def main():
-    record_audio()
-    text = transcribe(FILENAME)
-    print(f"📝 Text: {text}")
+### Key Takeaways
+1. STT is the "ears" of Remy
+2. Groq Whisper = free + fast + no RAM usage
+3. FLAC is better than WAV
+4. Record at 16 kHz mono
+5. Always load API keys from `.env`
+6. `.env` must be in `.gitignore`
+7. Test files stay temporary; real code goes in `src/`
 
-if __name__ == "__main__":
-    main()
-
-
-### 📦 Libraries Used
-| Library | Purpose |
-|---------|---------|
-| `groq` | Groq API client |
-| `sounddevice` | Microphone access |
-| `soundfile` | Write audio to FLAC |
-| `python-dotenv` | Load `.env` |
-
-**Install:**
-```bash
-pip install groq sounddevice soundfile python-dotenv
-
-**Yani:** Üç tane backtick (` ``` `) ekle. Bu, kod bloğunu **kapatır.**
-
-**Sonra Day 5 başlar:**
-
-```markdown
 ---
 
 ## Day 5 — Text-to-Speech (Mouth) + First Voice Conversation
-...
+
+**Date:** 2025-01-XX
+**Duration:** ~6 hours
+**Difficulty:** 🟠 Hard
+
+### Goal
+Make Remy speak the response. Today we add text-to-speech (TTS) so Remy talks back.
+
+### Concepts Learned
+
+#### 1. What is TTS?
+- TTS = Text-to-Speech
+- Converts text into audio
+- Pipeline: Text → TTS model → Audio file → Speaker
+
+#### 2. What is Piper?
+- Piper = neural TTS engine by Rhasspy
+- Runs locally (no cloud)
+- Model sizes: low, medium, high
+- high = best quality
+
+#### 3. Piper vs macOS `say`
+- Piper: Natural (neural), fast, needs model
+- macOS `say`: Robotic, instant, built-in
+
+#### 4. Audio Playback on macOS
+- `afplay`: Native, but conflicts with `sounddevice`
+- `say`: Stable, but robotic
+- `sd.play()`: Python API, but crashes
+- Solution: `afplay` + `time.sleep(0.5)`
+
+#### 5. CoreAudio Conflict
+- `sounddevice` (mic) + `afplay` (speaker) → conflict
+- AirPods makes it worse
+- Fix: `time.sleep(0.5)` or `sudo killall coreaudiod`
+
+#### 6. Text Cleaning for TTS
+- LLM output contains markdown
+- Piper reads them letter by letter
+- Fix: Regex to remove markdown
+
+### What I Built
+
+**File:** `src/mouth/speaker.py`
+
+**Functions:**
+- `clean_text_for_tts(text)` → Removes markdown, symbols
+- `speak(text)` → TTS + playback
+
+**File:** `remy.py` (updated)
+- Full voice loop: listen → think → speak
+
+### Libraries Used
+- `piper-tts` → TTS engine
+- `subprocess` → Call `piper` + `afplay`
+- `re` → Text cleaning
+
+### Problems
+1. `afplay` + `sounddevice` conflict → `time.sleep(0.5)`
+2. AirPods makes it worse → use Mac speakers
+3. `sd.play()` crashes → use `afplay`
+4. Piper reads markdown → `clean_text_for_tts()`
+5. `KeyboardInterrupt` traceback → `try/except`
+
+### Results
+- Piper TTS: Natural voice
+- `afplay`: OK
+- Text cleaning: OK
+- Full voice loop: OK
+- No crash: OK
+
+### Key Takeaways
+1. Piper = natural, local, free TTS
+2. `high` model > `low` model
+3. `afplay` + `time.sleep` avoids conflict
+4. Clean text before TTS
+5. `try/except KeyboardInterrupt` for clean exit
+6. Full voice loop = listen + think + speak
+
+---
+
+## Day 6 — (Coming Soon)
+
+### Planned
+- Speed optimization (faster model, Groq, streaming)
+- Barge-in (interrupt Remy while speaking)
+- Tool calling
