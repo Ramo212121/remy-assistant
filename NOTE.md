@@ -278,3 +278,13 @@ if __name__ == "__main__":
 **Install:**
 ```bash
 pip install groq sounddevice soundfile python-dotenv
+
+**Yani:** Üç tane backtick (` ``` `) ekle. Bu, kod bloğunu **kapatır.**
+
+**Sonra Day 5 başlar:**
+
+```markdown
+---
+
+## Day 5 — Text-to-Speech (Mouth) + First Voice Conversation
+...
