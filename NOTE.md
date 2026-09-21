@@ -171,7 +171,7 @@ Make Remy hear the user via speech-to-text (STT).
 
 ### Concepts Learned
 
-#### 1. What is STT?
+#### 1. What is STT?cat NOTE.md | grep "## Day"
 - STT = Speech-to-Text
 - Converts audio into text
 - Pipeline: Microphone → Audio file → STT model → Text
@@ -337,9 +337,261 @@ Make Remy speak the response. Today we add text-to-speech (TTS) so Remy talks ba
 
 ---
 
-## Day 6 — (Coming Soon)
+İşte kanka, **Gün 6 ve Gün 7 notları.** `NOTE.md`'nin en altına ekle. 🔥
+
+---
+
+```markdown
+---
+
+## Day 6 — Speed Optimization (Streaming)
+
+**Date:** 2025-01-XX
+**Duration:** ~5 hours
+**Difficulty:** 🟠 Hard
+
+### Goal
+Make Remy respond faster. Until now, the user waited 5-10 seconds for a reply. Today we add **streaming** so the first words arrive in 1-2 seconds.
+
+### Concepts Learned
+
+#### 1. What is Streaming?
+- LLM generates text **token by token** instead of all at once
+- Each token is a word or word-piece
+- **Without streaming:** Wait for full reply → 5-10 sec
+- **With streaming:** First sentence ready → 1-2 sec
+
+#### 2. Ollama Streaming
+- `ollama.chat(..., stream=True)` returns a generator
+- Each `chunk` contains one token
+- `chunk['message']['content']` is the token
+
+#### 3. Sentence Buffering
+- Accumulate tokens in a `buffer`
+- When a sentence-ending punctuation appears (`. `, `! `, `? `), send buffer to TTS
+- **Minimum length check** (`len > 30`) prevents splitting short phrases like `"I'm"`
+
+#### 4. Threading
+- `threading.Thread` runs TTS in background
+- LLM keeps generating while TTS plays
+- `t.join()` waits for all threads to finish
+
+### What I Built
+
+**File:** `remy.py` (updated)
+
+**Streaming logic:**
+```python
+stream = ollama.chat(model='qwen2.5:7b', messages=messages, stream=True)
+
+buffer = ""
+reply = ""
+
+for chunk in stream:
+    token = chunk['message']['content']
+    buffer += token
+    reply += token
+    if len(buffer.strip()) > 30 and any(p in buffer for p in ['. ', '! ', '? ']):
+        sentence = buffer.strip()
+        speak(sentence)
+        buffer = ""
+
+if buffer.strip():
+    speak(buffer.strip())
+```
+
+### Problems
+1. **Sentences split incorrectly** (`"I'm"` → `"I"` + `"'m"`)
+   - Cause: `len > 15` too short
+   - Fix: `len > 30`
+2. **`afplay` crashes** (`AudioQueueStart failed`)
+   - Cause: Multiple `afplay` running at once
+   - Fix: Speech queue (see Day 7)
+3. **Remy hears itself** (echo)
+   - Cause: Mic still active during TTS
+   - Fix: `set_speaking()` flag (see Day 7)
+
+### Results
+- First sound: 1-2 seconds (was 5-10)
+- Total response: 3-5 seconds
+- Streaming: working
+- Sentence splitting: fixed
+
+### Key Takeaways
+1. Streaming makes LLM feel instant
+2. Sentence buffering groups tokens into speakable chunks
+3. `len > 30` prevents splitting short phrases
+4. Threading lets TTS run in background
+
+---
+
+## Day 7 — Echo, Sentence Splitting, and Crash Fixes
+
+**Date:** 2025-01-XX
+**Duration:** ~6 hours
+**Difficulty:** 🟠 Hard
+
+### Goal
+Fix three stability issues:
+1. **Echo** — Remy hears its own voice and replies to itself
+2. **Sentence splitting** — short phrases broken mid-word
+3. **`afplay` crash** — `AudioQueueStart failed`
+
+### Concepts Learned
+
+#### 1. Echo Problem
+- Remy speaks → microphone picks up the sound → Whisper transcribes it → Remy replies to itself
+- **Fix:** Pause microphone while Remy speaks
+
+#### 2. `set_speaking` Flag (Better Than stop/start)
+- **Old way:** `_stream.stop()` / `_stream.start()`
+- **Problem:** macOS CoreAudio crashes (`PaMacCore Error -9986`) when restarting stream
+- **New way:** Global flag `is_speaking`
+  - `listen()` returns `""` if `is_speaking` is True
+  - Stream never stops → no crash
+
+#### 3. Buffer Clearing
+- Even with `set_speaking`, stale audio stays in mic buffer
+- **Fix:** `clear_buffer()` reads and discards 1 second of audio before resuming
+
+#### 4. Speech Queue
+- **Problem:** Multiple `afplay` processes conflict
+- **Fix:** `queue.Queue` + worker thread
+  - `speak()` adds text to queue
+  - Worker pulls one at a time, plays it, waits
+  - **Guarantees:** only one `afplay` at a time
+
+#### 5. `wait_until_done()`
+- `_speech_queue.join()` waits until queue is empty
+- **Use:** After `speak()`, before `set_speaking(False)`
+- **Ensures:** TTS fully finished before mic reopens
+
+#### 6. Double Print Fix
+- **Problem:** `remy.py` and `speaker.py` both printed `🔊 Remy: ...`
+- **Fix:** Remove `print` from `remy.py`, keep only in `speaker.py`
+
+### What I Built
+
+**File:** `src/ears/listener.py` (updated)
+
+**New functions:**
+```python
+is_speaking = False
+
+def set_speaking(value):
+    global is_speaking
+    is_speaking = value
+
+def clear_buffer():
+    global _stream
+    if _stream is not None:
+        try:
+            _stream.read(16000)
+        except:
+            pass
+
+def listen(duration=DURATION, language="en"):
+    global is_speaking
+    if is_speaking:
+        time.sleep(0.5)
+        return ""
+    filename = record_audio(duration=duration)
+    text = transcribe(filename)
+    return text
+```
+
+**File:** `src/mouth/speaker.py` (updated)
+
+**Queue + worker:**
+```python
+_speech_queue = queue.Queue()
+
+def _speech_worker():
+    counter = 0
+    while True:
+        text = _speech_queue.get()
+        if text is None:
+            break
+        text = text.replace("Remy", "Remi")
+        text = clean_text_for_tts(text)
+        if not text.strip():
+            _speech_queue.task_done()
+            continue
+        print(f"🔊 Remy: {text}")
+        counter += 1
+        output_file = f"temp_speech_{counter}.wav"
+        subprocess.run(["piper", "-m", MODEL_PATH, "-f", output_file],
+                       input=text.encode("utf-8"), check=True)
+        try:
+            subprocess.run(["afplay", output_file], check=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            print("⚠️ afplay timeout")
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️ afplay error: {e}")
+        time.sleep(1.0)
+        if os.path.exists(output_file):
+            os.remove(output_file)
+        _speech_queue.task_done()
+
+_worker_thread = threading.Thread(target=_speech_worker, daemon=True)
+_worker_thread.start()
+
+def speak(text):
+    _speech_queue.put(text)
+
+def wait_until_done():
+    _speech_queue.join()
+```
+
+**File:** `remy.py` (updated)
+
+**Main loop:**
+```python
+set_speaking(True)   # Remy is about to speak
+response = ollama.chat(model='qwen2.5:7b', messages=messages)
+reply = response['message']['content']
+speak(reply)
+wait_until_done()    # Wait for TTS to finish
+clear_buffer()       # Clear mic buffer
+set_speaking(False)  # Mic can listen again
+```
+
+### Problems Solved
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| Echo | Mic active during TTS | `set_speaking(True)` |
+| Stream crash | `stop()` / `start()` loop | Never stop stream, use flag |
+| Stale audio | Buffer holds old sound | `clear_buffer()` |
+| `afplay` conflict | Multiple processes | Speech queue |
+| Double print | Both files print | Remove from `remy.py` |
+
+### Results
+- Echo: **fixed**
+- Sentence splitting: **fixed**
+- `afplay` crash: **fixed**
+- Stream crash: **fixed**
+- Double print: **fixed**
+- Program: **stable**
+
+### Key Takeaways
+1. Never `stop()` / `start()` a `sounddevice` stream on macOS
+2. Use a **flag** to ignore microphone instead
+3. **Speech queue** prevents `afplay` conflicts
+4. **`wait_until_done()`** ensures TTS finishes before mic reopens
+5. **`clear_buffer()`** removes stale audio
+6. One `print` per message — pick a layer
+
+---
+
+## Day 8 — Speaker Recognition (Coming Soon)
 
 ### Planned
-- Speed optimization (faster model, Groq, streaming)
-- Barge-in (interrupt Remy while speaking)
-- Tool calling
+- Only respond to **my voice** (not others)
+- Voice fingerprint enrollment
+- Resemblyzer or Vosk
+```
+
+
+
+

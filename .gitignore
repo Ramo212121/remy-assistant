@@ -1,21 +1,22 @@
-# Python
+# Secrets
+.env
+.env.*
+
+# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-venv/
-env/
-ENV/
+*.pyc
 
-# IDE
-.vscode/
-.idea/
-*.swp
-
-# OS
+# macOS
 .DS_Store
 
-# Proje
-*.log
-.env
+# Models
+*.onnx
+*.onnx.json
+
+# Temp audio
+temp_*.wav
+temp.flac
+test.wav
+
+# Backup
+remy_backup.py
