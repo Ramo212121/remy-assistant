@@ -584,13 +584,104 @@ set_speaking(False)  # Mic can listen again
 
 ---
 
-## Day 8 — Speaker Recognition (Coming Soon)
+---
 
-### Planned
-- Only respond to **my voice** (not others)
-- Voice fingerprint enrollment
-- Resemblyzer or Vosk
+## Day 8 — Speaker Recognition (Only My Voice)
+
+**Date:** 2025-01-XX
+**Duration:** ~6 hours
+**Difficulty:** 🟠 Hard
+
+### Goal
+Make Remy respond **only to my voice**. Ignore other people, TV, background noise. This is called **Speaker Verification** — the assistant knows who is talking.
+
+### Concepts Learned
+
+#### 1. What is Speaker Recognition?
+- **Speaker Recognition** = identifying who is speaking
+- Two types:
+  - **Identification:** Who is this? (1 of N speakers)
+  - **Verification:** Is this the enrolled user? (yes/no)
+- We use **Verification** — accept or reject
+
+#### 2. Voice Embedding
+- A **voice embedding** is a 256-dimensional vector
+- It represents the **unique characteristics** of a voice
+- Same speaker → similar embeddings
+- Different speaker → different embeddings
+- **Model:** Resemblyzer (`VoiceEncoder`)
+
+#### 3. Enrollment
+- **Enrollment** = recording the user's voice to create their profile
+- Record 30-60 seconds of natural speech
+- Extract embedding → save to `voice_profile.npy`
+- Done **once** per user
+
+#### 4. Verification (Similarity Check)
+- For each new audio:
+  1. Extract embedding
+  2. Compare with stored embedding using **cosine similarity**
+  3. If similarity > threshold → accept
+  4. Else → reject
+- **Cosine similarity** ranges from -1 to 1 (1 = identical)
+
+#### 5. Threshold Tuning
+- **Threshold** decides who is accepted
+- Too high → rejects the real user (false negative)
+- Too low → accepts others (false positive)
+- **Test values:**
+  - `0.75` → too strict (real user rejected)
+  - `0.65` → good balance
+  - `0.55` → too loose
+
+#### 6. Resemblyzer
+- Open-source speaker embedding model
+- Runs locally (no cloud)
+- **Requires:** `torch`, `librosa`, `webrtcvad`
+- **Install issue:** `webrtcvad` uses deprecated `pkg_resources`
+- **Fix:** `pip install "setuptools<82"`
+
+### What I Built
+
+**File:** `enroll.py` (new)
+
+**Purpose:** Record voice once and save profile.
+
+**Flow:**
+1. Wait 3 seconds (prepare)
+2. Record 30 seconds of voice
+3. Extract embedding using `VoiceEncoder`
+4. Save to `voice_profile.npy`
+
+**Code:**
+```python
+import sounddevice as sd
+import soundfile as sf
+import numpy as np
+from resemblyzer import VoiceEncoder, preprocess_wav
+from pathlib import Path
+
+DURATION = 30
+SAMPLE_RATE = 16000
+FILENAME = "my_voice.wav"
+PROFILE = "voice_profile.npy"
+
+def record_voice():
+    print(f"🎤 Recording for {DURATION} seconds...")
+    import time
+    time.sleep(3)
+    recording = sd.rec(int(DURATION * SAMPLE_RATE),
+                       samplerate=SAMPLE_RATE, channels=1, dtype='float32')
+    sd.wait()
+    sf.write(FILENAME, recording, SAMPLE_RATE)
+
+def create_profile():
+    wav = preprocess_wav(Path(FILENAME))
+    encoder = VoiceEncoder()
+    embedding = encoder.embed_utterance(wav)
+    np.save(PROFILE, embedding)
 ```
+
 
 
 
