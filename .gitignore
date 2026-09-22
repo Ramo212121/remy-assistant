@@ -17,6 +17,12 @@ __pycache__/
 temp_*.wav
 temp.flac
 test.wav
+temp_speech_*.wav
 
 # Backup
 remy_backup.py
+
+# Personal data
+voice_profile.npy
+my_voice.wav
+remy.db
