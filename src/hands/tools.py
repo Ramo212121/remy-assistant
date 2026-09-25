@@ -1,6 +1,11 @@
+import os
 from datetime import datetime
 import subprocess
+import fitz  # PyMuPDF
 from src.memory.database import save_reminder
+
+
+PROJECT_DIR = os.path.expanduser("~/Desktop/MyProjects/remy")
 
 
 def get_time():
@@ -28,6 +33,31 @@ def set_reminder(remind_at, content):
     """Set a reminder."""
     save_reminder(remind_at, content)
     return f"Reminder set for {remind_at}: {content}"
+
+
+def open_app(app_name):
+    """Open a macOS application by name."""
+    try:
+        subprocess.run(["open", "-a", app_name], check=True)
+        return f"Opened {app_name}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def read_pdf(file_path):
+    """Read text from a PDF file."""
+    if not file_path.startswith("/"):
+        file_path = os.path.join(PROJECT_DIR, file_path)
+
+    try:
+        doc = fitz.open(file_path)
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        doc.close()
+        return text[:2000]
+    except Exception as e:
+        return f"Error: {e}"
 
 
 TOOLS = [
@@ -82,6 +112,40 @@ TOOLS = [
                     }
                 },
                 "required": ["remind_at", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_app",
+            "description": "Open a macOS application by name",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app_name": {
+                        "type": "string",
+                        "description": "App name, e.g. 'Spotify', 'Safari', 'Visual Studio Code'"
+                    }
+                },
+                "required": ["app_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_pdf",
+            "description": "Read text from a PDF file. Use only the filename (e.g. 'test.pdf'), not a full path. The PDF must be in the Remy project folder.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "PDF filename, e.g. 'test.pdf'"
+                    }
+                },
+                "required": ["file_path"]
             }
         }
     }
