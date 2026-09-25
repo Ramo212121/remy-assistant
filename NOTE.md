@@ -686,3 +686,149 @@ def create_profile():
 
 
 
+İşte kanka, **Gün 9 notları.** `NOTE.md`'nin en altına ekle. 🔥
+
+```markdown
+---
+
+## Day 9 — Barge-in (Interrupt While Speaking)
+
+**Date:** 2025-01-XX
+**Duration:** ~6 hours
+**Difficulty:** 🔴 Hard
+
+### Goal
+When Remy is speaking and the user starts talking, Remy should **stop immediately** and listen. Just like Alexa/Google Home.
+
+### Concepts Learned
+
+#### 1. What is Barge-in?
+- **Barge-in** = interrupting the assistant while it speaks
+- Without it: user waits for Remy to finish
+- With it: Remy stops instantly when user speaks
+- Real assistants (Alexa, Siri) support this
+
+#### 2. Volume Detection
+- Read mic volume continuously via `sounddevice.InputStream`
+- **RMS formula:** `volume = np.linalg.norm(indata) / len(indata)`
+- Result is a small float (0.001 – 0.2)
+- `callback()` fires every ~0.1 seconds
+
+#### 3. Threshold Tuning
+- **Interrupt threshold** decides when to stop `afplay`
+- Values observed:
+  - Silent room: `0.001 – 0.005`
+  - Remy's own voice (from speaker to mic): `0.05 – 0.15`
+  - User speaking directly: `0.15 – 0.25`
+- **Problem:** Remy's own voice and user's voice overlap
+- **Fix:** Set threshold to `0.25` so only loud user speech interrupts
+
+#### 4. Stopping `afplay`
+- `afplay` runs as a subprocess (`Popen`)
+- `proc.terminate()` sends SIGTERM to stop playback
+- `sd.CallbackStop` exits the mic stream cleanly
+- `proc.wait(timeout=30)` prevents hangs
+
+#### 5. Speaker Recognition Threshold
+- Voice similarity between user and enrolled profile
+- Values observed:
+  - User speaking clearly: `0.65 – 0.85`
+  - User speaking short words: `0.55 – 0.65`
+  - Other people: `0.45 – 0.60`
+- **Problem:** Short utterances give low similarity
+- **Fix:** Lower threshold from `0.65` to `0.55`
+
+#### 6. Echo Problem During Barge-in
+- Remy's own voice reaches the microphone
+- Causes false interrupts (Remy interrupts itself)
+- Causes Remy to transcribe its own speech and reply to itself
+- **Fix:** Raise `INTERRUPT_THRESHOLD` to `0.25` so only real user speech triggers
+
+### What I Built
+
+**File:** `src/mouth/speaker.py` (updated)
+
+**New constant:**
+```python
+INTERRUPT_THRESHOLD = 0.25
+```
+
+**New imports:**
+```python
+import numpy as np
+import sounddevice as sd
+```
+
+**New function:**
+```python
+def _listen_for_interrupt(proc, threshold=INTERRUPT_THRESHOLD):
+    """Listen to mic while afplay plays. Stop afplay if user speaks."""
+    def callback(indata, frames, time_info, status):
+        volume = np.linalg.norm(indata) / len(indata)
+        if volume > threshold:
+            print(f"🛑 Interrupt detected (volume: {volume:.4f})")
+            proc.terminate()
+            raise sd.CallbackStop()
+
+    try:
+        with sd.InputStream(callback=callback, channels=1, samplerate=16000, device=0):
+            proc.wait()
+    except sd.CallbackStop:
+        pass
+    except Exception as e:
+        print(f"⚠️ Interrupt listener error: {e}")
+```
+
+**Updated `_speech_worker`:**
+```python
+try:
+    proc = subprocess.Popen(["afplay", output_file])
+    _listen_for_interrupt(proc)
+    proc.wait(timeout=30)
+except subprocess.TimeoutExpired:
+    print("⚠️ afplay timeout")
+    proc.kill()
+    proc.wait()
+```
+
+**File:** `src/ears/listener.py` (updated)
+
+**Threshold changed:**
+```python
+SIMILARITY_THRESHOLD = 0.55   # was 0.65
+```
+
+### Problems Solved
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| Remy interrupts itself | Own voice reaches mic | Threshold `0.25` |
+| "Voice ignoring" errors | Short utterances give low similarity | Threshold `0.55` |
+| `afplay` hangs | No timeout | `proc.wait(timeout=30)` |
+| Mic stream stays open | Callback doesn't stop | `sd.CallbackStop` |
+
+### Results
+- Barge-in: **working**
+- Remy stops when user speaks: **yes**
+- Remy interrupts itself: **no**
+- Speaker recognition: **stable** (0.68 typical)
+- Threshold values: interrupt `0.25`, similarity `0.55`
+
+### Key Takeaways
+1. **Barge-in** makes the assistant feel responsive
+2. **Volume threshold** must separate user voice from own voice
+3. **RMS** is a simple, effective volume metric
+4. **`proc.terminate()`** stops `afplay` cleanly
+5. **`sd.CallbackStop`** exits the stream gracefully
+6. **Speaker recognition threshold** needs tuning for short phrases
+7. **Echo** is the main enemy of barge-in
+
+---
+```
+
+---
+
+
+
+
+
