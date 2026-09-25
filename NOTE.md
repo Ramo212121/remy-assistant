@@ -1219,6 +1219,197 @@ def set_reminder(remind_at, content):
 7. **Tool calling** makes reminders voice-controlled
 
 
+İşte kanka, **Gün 12 notları.** `NOTE.md`'nin en altına ekle. 🔥
+
+```markdown
+---
+
+## Day 12 — App Control + PDF Reading
+
+**Date:** 2025-01-XX
+**Duration:** ~6 hours
+**Difficulty:** 🟡 Medium
+
+### Goal
+Make Remy open apps and read PDFs via voice commands:
+- "Open Safari" → Safari launches
+- "Read test.pdf" → Remy reads the PDF content
+
+### Concepts Learned
+
+#### 1. macOS App Control via `subprocess`
+- `subprocess.run(["open", "-a", "AppName"])` launches an app
+- `-a` flag = "application by name"
+- Works for any installed app: Safari, Spotify, VS Code
+- `check=True` raises error if launch fails
+
+#### 2. PDF Reading with PyMuPDF
+- `pip install pymupdf`
+- Import: `import fitz` (or `import pymupdf` in newer versions)
+- `fitz.open(path)` opens a PDF
+- `page.get_text()` extracts text from one page
+- Loop over pages → concatenate text
+- `doc.close()` releases the file
+
+#### 3. Short Path Support
+- **Problem:** LLM shouldn't guess full paths
+- **Fix:** If input doesn't start with `/`, prepend `PROJECT_DIR`
+- Example: `"test.pdf"` → `~/Desktop/MyProjects/remy/test.pdf`
+- **Benefit:** User says "read test.pdf", no full path needed
+
+#### 4. Tool Description Tuning
+- LLM chooses tools based on `description`
+- Vague description → wrong tool calls (e.g., "Read test PDF" → `open_app("Safari")`)
+- **Fix:** Add explicit examples and constraints
+  - `"Use only the filename (e.g. 'test.pdf'), not a full path"`
+  - `"The PDF must be in the Remy project folder"`
+
+#### 5. System Prompt Rules
+- Even better than tool descriptions for edge cases
+- Add numbered rules:
+  - `"read PDF" → use read_pdf with filename. Do NOT open Safari.`
+  - `"open <app>" → use open_app`
+- LLM follows rules more reliably
+
+#### 6. Creating Test PDFs on macOS
+- `cupsfilter input.txt > output.pdf` converts text to PDF
+- Built into macOS, no extra install
+- Useful for testing
+
+#### 7. `fitz` Deprecation Warning
+- `fitz` API is deprecated in newer PyMuPDF versions
+- Use `import pymupdf` instead
+- Same functions, new name
+
+### What I Built
+
+**File:** `src/hands/tools.py` (updated)
+
+**New imports:**
+```python
+import os
+import fitz
+PROJECT_DIR = os.path.expanduser("~/Desktop/MyProjects/remy")
+```
+
+**New functions:**
+```python
+def open_app(app_name):
+    try:
+        subprocess.run(["open", "-a", app_name], check=True)
+        return f"Opened {app_name}"
+    except Exception as e:
+        return f"Error: {e}"
+
+def read_pdf(file_path):
+    if not file_path.startswith("/"):
+        file_path = os.path.join(PROJECT_DIR, file_path)
+    try:
+        doc = fitz.open(file_path)
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        doc.close()
+        return text[:2000]
+    except Exception as e:
+        return f"Error: {e}"
+```
+
+**New tool definitions:**
+```python
+{
+    "type": "function",
+    "function": {
+        "name": "open_app",
+        "description": "Open a macOS application by name",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "app_name": {"type": "string", "description": "App name"}
+            },
+            "required": ["app_name"]
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "read_pdf",
+        "description": "Read text from a PDF file. Use only the filename (e.g. 'test.pdf'), not a full path. The PDF must be in the Remy project folder.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "PDF filename"}
+            },
+            "required": ["file_path"]
+        }
+    }
+}
+```
+
+**File:** `remy.py` (updated)
+
+- Imported `open_app`, `read_pdf`
+- Added rules to `SYSTEM_PROMPT`:
+```
+IMPORTANT RULES:
+- "read PDF" → use read_pdf with filename (e.g. "test.pdf"). Do NOT open Safari.
+- "open <app>" → use open_app tool.
+- time/date → get_time / get_date.
+- math → calculate.
+- reminder → set_reminder.
+```
+- Added tool handler cases:
+```python
+elif name == 'open_app':
+    result = open_app(args.get('app_name', ''))
+elif name == 'read_pdf':
+    result = read_pdf(args.get('file_path', ''))
+```
+
+### Problems
+1. **Wrong tool called** ("Read test PDF" → `open_app("Safari")`)
+   - Cause: Vague `read_pdf` description
+   - Fix: Explicit description + system prompt rules
+2. **PDF not found** (`/path/to/your/test.pdf`)
+   - Cause: LLM guessed a fake path
+   - Fix: Short path support + description says "filename only"
+3. **Multiple tool calls with wrong names** (`test.pdf`, `text.pdf`)
+   - Cause: LLM unsure, tries variations
+   - Fix: PDF file actually exists → success
+4. **`fitz` deprecation warning**
+   - Cause: PyMuPDF renamed `fitz` to `pymupdf`
+   - Fix: Ignore warning (works fine) or use `import pymupdf`
+
+### Results
+- `open_app("Safari")`: OK
+- `open_app("Spotify")`: OK
+- `read_pdf("test.pdf")`: OK (after creating the file)
+- Short path resolution: OK
+- Tool description tuning: OK
+- System prompt rules: OK
+- Total tools: **6**
+
+### Key Takeaways
+1. **`subprocess.run(["open", "-a", "App"])`** opens macOS apps
+2. **PyMuPDF** reads PDFs in 5 lines of code
+3. **Short path support** lets user say "test.pdf" not full path
+4. **Tool descriptions** must be explicit — LLM follows them literally
+5. **System prompt rules** override LLM confusion
+6. **`cupsfilter`** creates test PDFs on macOS
+7. **`fitz` vs `pymupdf`** — same library, new name
+
+---
+```
+
+---
+
+
+
+
+
+
+
 
 
 
