@@ -4,8 +4,11 @@ import time
 import re
 import queue
 import threading
+import numpy as np
+import sounddevice as sd
 
 MODEL_PATH = "en_US-ryan-high.onnx"
+INTERRUPT_THRESHOLD = 0.25
 
 _speech_queue = queue.Queue()
 
@@ -28,6 +31,24 @@ def clean_text_for_tts(text):
     return text
 
 
+def _listen_for_interrupt(proc, threshold=INTERRUPT_THRESHOLD):
+    """Listen to mic while afplay plays. Stop afplay if user speaks."""
+    def callback(indata, frames, time_info, status):
+        volume = np.linalg.norm(indata) / len(indata)
+        if volume > threshold:
+            print(f"🛑 Interrupt detected (volume: {volume:.4f})")
+            proc.terminate()
+            raise sd.CallbackStop()
+
+    try:
+        with sd.InputStream(callback=callback, channels=1, samplerate=16000, device=0):
+            proc.wait()
+    except sd.CallbackStop:
+        pass
+    except Exception as e:
+        print(f"⚠️ Interrupt listener error: {e}")
+
+
 def _speech_worker():
     """Pull sentences from queue, play one by one."""
     counter = 0
@@ -35,39 +56,40 @@ def _speech_worker():
         text = _speech_queue.get()
         if text is None:
             break
-        
+
         text = text.replace("Remy", "Remi")
         text = clean_text_for_tts(text)
         if not text.strip():
             _speech_queue.task_done()
             continue
-        
+
         print(f"🔊 Remy: {text}")
-        
-        # Her cümle için ayrı dosya
+
         counter += 1
         output_file = f"temp_speech_{counter}.wav"
-        
-        # Piper ile sese çevir
+
+        # Piper: text → wav
         subprocess.run(
             ["piper", "-m", MODEL_PATH, "-f", output_file],
             input=text.encode("utf-8"),
             check=True
         )
-        
-        # afplay ile çal
+
+        # afplay + interrupt listener
         try:
-            subprocess.run(["afplay", output_file], check=True, timeout=30)
+            proc = subprocess.Popen(["afplay", output_file])
+            _listen_for_interrupt(proc)
+            proc.wait(timeout=30)
         except subprocess.TimeoutExpired:
             print("⚠️ afplay timeout")
-        except subprocess.CalledProcessError as e:
-            print(f"⚠️ afplay error: {e}")
-        
+            proc.kill()
+            proc.wait()
+
         time.sleep(1.0)
-        
+
         if os.path.exists(output_file):
             os.remove(output_file)
-        
+
         _speech_queue.task_done()
 
 

@@ -686,7 +686,6 @@ def create_profile():
 
 
 
-İşte kanka, **Gün 9 notları.** `NOTE.md`'nin en altına ekle. 🔥
 
 ```markdown
 ---
@@ -827,6 +826,397 @@ SIMILARITY_THRESHOLD = 0.55   # was 0.65
 ```
 
 ---
+
+
+
+```
+---
+
+## Day 10 — Tool Calling (Time, Date, Calculate)
+
+**Date:** 2025-01-XX
+**Duration:** ~6 hours
+**Difficulty:** 🟠 Hard
+
+### Goal
+Make Remy use real tools. Until now, Remy only talked. Now it can call Python functions to get real data.
+
+### Concepts Learned
+
+#### 1. What is Tool Calling?
+- LLM decides **when** to call a function
+- Python **executes** the function
+- LLM **explains** the result
+- Flow:
+  1. User: "What time is it?"
+  2. LLM: "I should call `get_time()`"
+  3. Python: `get_time()` → `"23:55"`
+  4. LLM: "It's 23:55."
+
+#### 2. JSON Schema for Tools
+- Each tool described as JSON
+- Fields:
+  - `type`: "function"
+  - `function.name`: function name
+  - `function.description`: what it does
+  - `function.parameters`: input schema
+- Model reads this to decide which tool to call
+
+#### 3. Ollama `tools` Parameter
+- `ollama.chat(..., tools=TOOLS)` enables tool calling
+- Response contains `tool_calls` if model wants to call a tool
+- `tool_calls` = list of `ToolCall` objects
+- Each has `function.name` and `function.arguments`
+
+#### 4. Tool Call Loop
+1. Send user message + tools to LLM
+2. If `tool_calls` present:
+   - Execute each tool
+   - Append `{'role': 'tool', 'content': result}` to messages
+   - Send again to LLM
+3. LLM produces final text response
+
+#### 5. Arguments Handling
+- Arguments come as a dict: `{'expression': '25 * 4'}`
+- Access with `args.get('expression', '')`
+- Empty arguments for no-param tools like `get_time`
+
+### What I Built
+
+**File:** `src/hands/tools.py` (new)
+
+**Functions:**
+```python
+from datetime import datetime
+
+def get_time():
+    now = datetime.now()
+    return now.strftime("%H:%M")
+
+def get_date():
+    now = datetime.now()
+    return now.strftime("%A, %B %d, %Y")
+
+def calculate(expression):
+    try:
+        result = eval(expression)
+        return str(result)
+    except Exception as e:
+        return f"Error: {e}"
+```
+
+**Tool definitions:**
+```python
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_time",
+            "description": "Get the current time",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_date",
+            "description": "Get today's date",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "Calculate a math expression like '2 + 2'",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "The math expression"
+                    }
+                },
+                "required": ["expression"]
+            }
+        }
+    }
+]
+```
+
+**File:** `remy.py` (updated)
+
+**Handler:**
+```python
+def handle_tool_calls(response):
+    tool_calls = response['message'].get('tool_calls', [])
+    results = []
+    for call in tool_calls:
+        name = call.function.name
+        args = call.function.arguments
+        if name == 'get_time':
+            result = get_time()
+        elif name == 'get_date':
+            result = get_date()
+        elif name == 'calculate':
+            result = calculate(args.get('expression', ''))
+        else:
+            result = "Unknown tool"
+        print(f"🛠️ Tool: {name} → {result}")
+        results.append({'role': 'tool', 'content': result})
+    return results
+```
+
+**Main loop:**
+```python
+response = ollama.chat(model='qwen2.5:7b', messages=messages, tools=TOOLS)
+
+if response['message'].get('tool_calls'):
+    tool_results = handle_tool_calls(response)
+    messages.append(response['message'])
+    messages.extend(tool_results)
+    response = ollama.chat(model='qwen2.5:7b', messages=messages, tools=TOOLS)
+
+reply = response['message']['content']
+```
+
+### Problems
+1. **`ToolCall` object, not dict**
+   - Cause: Ollama returns objects, not raw dicts
+   - Fix: Use `.function.name` and `.function.arguments`
+2. **Empty `content` when tool called**
+   - Normal: model returns only `tool_calls`, no text
+   - Fix: After tool execution, send back to get final text
+
+### Results
+- `get_time()`: OK (`23:55`)
+- `get_date()`: OK (`Friday, September 25, 2026`)
+- `calculate('25 * 4')`: OK (`100`)
+- Ollama `tool_calls`: OK
+- Full loop (tool → result → reply): OK
+
+### Key Takeaways
+1. **Tool calling** lets LLM use real functions
+2. **JSON schema** describes each tool
+3. **`tools=TOOLS`** enables tool calling in Ollama
+4. **`tool_calls`** in response means model wants a function
+5. **Loop:** call → execute → append → re-call
+6. **`ToolCall`** object uses `.function.name`, not dict keys
+7. **Empty content** with tool call is normal
+```
+
+---
+
+
+
+
+
+
+
+
+
+
+
+İşte kanka, **Gün 11 notları.** `NOTE.md`'nin en altına ekle. 🔥
+
+```markdown
+---
+
+## Day 11 — Reminder System (SQLite + macOS Notifications)
+
+**Date:** 2025-01-XX
+**Duration:** ~6 hours
+**Difficulty:** 🟡 Medium
+
+### Goal
+Make Remy set reminders. User says "remind me in 2 minutes to drink water" and gets a macOS notification at the right time.
+
+### Concepts Learned
+
+#### 1. Reminder Architecture
+- **3 parts:**
+  1. SQLite table (`reminders`) — stores reminders
+  2. Tool (`set_reminder`) — LLM calls it to add reminders
+  3. Background thread — checks every 30 seconds, sends notifications
+
+#### 2. SQLite `reminders` Table
+- Columns: `id`, `remind_at`, `content`, `done`
+- `remind_at` = ISO datetime string (`2025-09-26T14:00:00`)
+- `done` = 0 (pending) or 1 (done)
+- `init_db()` creates it with `CREATE TABLE IF NOT EXISTS`
+
+#### 3. Reminder Functions
+- `save_reminder(remind_at, content)` — inserts new reminder
+- `get_pending_reminders()` — returns `WHERE done = 0`
+- `mark_done(id)` — sets `done = 1`
+
+#### 4. Tool Calling for Reminders
+- Tool definition in `TOOLS` list (JSON schema)
+- Parameters: `remind_at` (ISO string), `content` (string)
+- Both required
+- LLM decides when to call it
+
+#### 5. Background Check Loop
+- `threading.Thread(daemon=True)` — runs in background
+- `while True:` — infinite loop
+- Every 30 seconds:
+  - Get pending reminders
+  - Compare `remind_at` with `now`
+  - If due → notify + mark done
+- `time.sleep(30)` — wait before next check
+
+#### 6. macOS Notifications via `osascript`
+- Command: `osascript -e 'display notification "..." with title "..."'`
+- `subprocess.run()` runs it
+- Notification appears in macOS Notification Center
+- Works with default notification settings
+
+#### 7. ISO Datetime Format
+- `datetime.now().isoformat()` → `'2025-09-26T23:55:12.345678'`
+- `datetime.fromisoformat(str)` → parses it back
+- **Why ISO?** Sortable, standard, human-readable
+
+### What I Built
+
+**File:** `src/memory/database.py` (updated)
+
+**New table:**
+```python
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS reminders (
+        id INTEGER PRIMARY KEY,
+        remind_at TEXT,
+        content TEXT,
+        done INTEGER DEFAULT 0
+    )
+""")
+```
+
+**New functions:**
+```python
+def save_reminder(remind_at, content):
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    cur.execute(
+        "INSERT INTO reminders (remind_at, content) VALUES (?, ?)",
+        (remind_at, content)
+    )
+    con.commit()
+    con.close()
+
+def get_pending_reminders():
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    cur.execute("SELECT id, remind_at, content FROM reminders WHERE done = 0")
+    rows = cur.fetchall()
+    con.close()
+    return rows
+
+def mark_done(reminder_id):
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    cur.execute("UPDATE reminders SET done = 1 WHERE id = ?", (reminder_id,))
+    con.commit()
+    con.close()
+```
+
+**File:** `src/hands/reminder.py` (new)
+
+```python
+import threading
+import time
+import subprocess
+from datetime import datetime
+from src.memory.database import get_pending_reminders, mark_done
+
+
+def send_notification(title, message):
+    subprocess.run([
+        "osascript", "-e",
+        f'display notification "{message}" with title "{title}"'
+    ])
+
+
+def check_loop():
+    while True:
+        now = datetime.now()
+        for rid, remind_at, content in get_pending_reminders():
+            try:
+                if datetime.fromisoformat(remind_at) <= now:
+                    print(f"🔔 Reminder: {content}")
+                    send_notification("Remy Reminder", content)
+                    mark_done(rid)
+            except Exception as e:
+                print(f"⚠️ Reminder error: {e}")
+        time.sleep(30)
+
+
+def start_reminder_checker():
+    threading.Thread(target=check_loop, daemon=True).start()
+    print("⏰ Reminder checker started")
+```
+
+**File:** `src/hands/tools.py` (updated)
+
+**New tool:**
+```python
+def set_reminder(remind_at, content):
+    save_reminder(remind_at, content)
+    return f"Reminder set for {remind_at}: {content}"
+```
+
+**JSON schema:**
+```python
+{
+    "type": "function",
+    "function": {
+        "name": "set_reminder",
+        "description": "Set a reminder at a specific time in ISO format",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "remind_at": {"type": "string", "description": "ISO datetime"},
+                "content": {"type": "string", "description": "What to remind about"}
+            },
+            "required": ["remind_at", "content"]
+        }
+    }
+}
+```
+
+**File:** `remy.py` (updated)
+
+- Imports `set_reminder`, `start_reminder_checker`
+- Calls `start_reminder_checker()` after `init_db()`
+- Tool handler handles `set_reminder`
+
+### Problems
+1. **`datetime.fromisoformat` fails on invalid strings**
+   - Cause: LLM may send wrong format
+   - Fix: `try/except` around parsing
+2. **Thread crashes silently**
+   - Cause: `daemon=True` threads die with main process
+   - OK: That's what we want
+3. **Notification doesn't appear**
+   - Cause: macOS notification settings / Do Not Disturb
+   - Fix: Check System Settings → Notifications
+
+### Results
+- `set_reminder` tool: OK
+- SQLite save: OK
+- Background checker: OK (every 30 sec)
+- macOS notification: OK
+- 2-minute reminder: **works**
+- No crashes: OK
+
+### Key Takeaways
+1. **Reminders need 3 parts:** storage + tool + background loop
+2. **SQLite + ISO datetime** works well
+3. **`threading.Thread(daemon=True)`** for background tasks
+4. **`osascript`** sends macOS notifications
+5. **`time.sleep(30)`** keeps CPU usage low
+6. **`try/except`** prevents crashes from bad data
+7. **Tool calling** makes reminders voice-controlled
 
 
 
