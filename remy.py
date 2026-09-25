@@ -2,11 +2,14 @@ import ollama
 from src.memory.database import init_db, save_message, get_messages
 from src.ears.listener import listen, _stream, set_speaking, clear_buffer
 from src.mouth.speaker import speak, wait_until_done
+from src.hands.tools import get_time, get_date, calculate, set_reminder, TOOLS
+from src.hands.reminder import start_reminder_checker
 
 SYSTEM_PROMPT = """You are Remy. You are the user's personal AI assistant.
 You speak English, friendly and concise."""
 
 init_db()
+start_reminder_checker()
 
 history = get_messages(limit=10)
 history.reverse()
@@ -17,6 +20,37 @@ for role, content in history:
 
 print("Remy is ready! (say 'quit' to exit)")
 print("-" * 40)
+
+
+def handle_tool_calls(response):
+    """Execute tool calls and return results."""
+    tool_calls = response['message'].get('tool_calls', [])
+    results = []
+    
+    for call in tool_calls:
+        name = call.function.name
+        args = call.function.arguments
+        
+        if name == 'get_time':
+            result = get_time()
+        elif name == 'get_date':
+            result = get_date()
+        elif name == 'calculate':
+            result = calculate(args.get('expression', ''))
+        elif name == 'set_reminder':
+            result = set_reminder(args.get('remind_at', ''), args.get('content', ''))
+        else:
+            result = "Unknown tool"
+        
+        print(f"🛠️ Tool: {name} → {result}")
+        
+        results.append({
+            'role': 'tool',
+            'content': result
+        })
+    
+    return results
+
 
 try:
     while True:
@@ -32,24 +66,23 @@ try:
         save_message('user', user_input)
         messages.append({'role': 'user', 'content': user_input})
         
-        # Remy konuşmaya başlıyor → mikrofonu yoksay
         set_speaking(True)
         
-        # Tam cevap al (streaming yok)
         print("⏳ Thinking...")
-        response = ollama.chat(model='qwen2.5:7b', messages=messages)
+        response = ollama.chat(model='qwen2.5:7b', messages=messages, tools=TOOLS)
+        
+        if response['message'].get('tool_calls'):
+            tool_results = handle_tool_calls(response)
+            messages.append(response['message'])
+            messages.extend(tool_results)
+            response = ollama.chat(model='qwen2.5:7b', messages=messages, tools=TOOLS)
+        
         reply = response['message']['content']
-        
-        
+        print(f"🔊 Remy: {reply}")
         speak(reply)
         
-        # TTS bitene kadar bekle
         wait_until_done()
-        
-        # Buffer'ı temizle
         clear_buffer()
-        
-        # Remy sustu → mikrofonu tekrar dinle
         set_speaking(False)
         
         save_message('assistant', reply)

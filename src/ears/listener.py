@@ -16,7 +16,7 @@ DURATION = 5
 SAMPLE_RATE = 16000
 CHANNELS = 1
 VOICE_PROFILE = "voice_profile.npy"
-SIMILARITY_THRESHOLD = 0.65
+SIMILARITY_THRESHOLD = 0.57
 
 # --- Globals ---
 _stream = None
