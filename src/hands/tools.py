@@ -1,8 +1,10 @@
 import os
 from datetime import datetime
 import subprocess
-import fitz  # PyMuPDF
+import pymupdf as fitz
 from src.memory.database import save_reminder
+from ddgs import DDGS
+from imapclient import IMAPClient
 
 
 PROJECT_DIR = os.path.expanduser("~/Desktop/MyProjects/remy")
@@ -56,6 +58,52 @@ def read_pdf(file_path):
             text += page.get_text()
         doc.close()
         return text[:2000]
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def web_search(query):
+    """Search the web using DuckDuckGo."""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=5))
+
+        if not results:
+            return "No results found"
+
+        output = f"Search results for '{query}':\n\n"
+        for i, r in enumerate(results, 1):
+            output += f"{i}. {r['title']}\n{r['body']}\n\n"
+
+        return output[:2000]
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def read_email(count=5):
+    """Read latest unread emails from Gmail."""
+    user = os.getenv("GMAIL_USER")
+    password = os.getenv("GMAIL_APP_PASSWORD")
+
+    if not user or not password:
+        return "Gmail credentials not set in .env"
+
+    try:
+        with IMAPClient("imap.gmail.com", ssl=True) as client:
+            client.login(user, password)
+            client.select_folder("INBOX")
+
+            messages = client.search(["UNSEEN"])
+            messages = messages[-count:]
+
+            output = f"Latest {len(messages)} unread emails:\n\n"
+            for uid, data in client.fetch(messages, ["ENVELOPE"]).items():
+                env = data[b"ENVELOPE"]
+                subject = env.subject.decode() if env.subject else "(no subject)"
+                from_addr = env.from_[0].mailbox.decode() + "@" + env.from_[0].host.decode()
+                output += f"From: {from_addr}\nSubject: {subject}\n\n"
+
+            return output[:2000]
     except Exception as e:
         return f"Error: {e}"
 
@@ -146,6 +194,39 @@ TOOLS = [
                     }
                 },
                 "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Search the web using DuckDuckGo. Use for questions about current events, facts, or anything that needs up-to-date information.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query, e.g. 'capital of Turkey'"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_email",
+            "description": "Read the latest unread emails from Gmail",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "description": "Number of emails to read (default 5)"
+                    }
+                }
             }
         }
     }
