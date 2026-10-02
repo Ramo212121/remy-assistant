@@ -271,7 +271,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_time",
-            "description": "Get the current time",
+            "description": "Get the current time. Use when user asks 'what time is it'.",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -279,7 +279,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_date",
-            "description": "Get today's date",
+            "description": "Get today's date. Use when user asks 'what's today's date'.",
             "parameters": {"type": "object", "properties": {}}
         }
     },
@@ -304,7 +304,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_reminder",
-            "description": "Set a reminder at a specific time in ISO format",
+            "description": "Set a reminder at a specific time in ISO format. Use when user says 'remind me'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -325,13 +325,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "open_app",
-            "description": "Open a macOS application by name, like 'Spotify', 'Safari', or 'Visual Studio Code'",
+            "description": "ONLY use this when the user explicitly says 'open <app>' or 'launch <app>'. Do NOT use for alarm, reminder, time, date, math, or any other request.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "app_name": {
                         "type": "string",
-                        "description": "App name"
+                        "description": "App name, e.g. 'Spotify', 'Safari', 'Visual Studio Code'"
                     }
                 },
                 "required": ["app_name"]
@@ -466,7 +466,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_alarm",
-            "description": "Set an alarm at a specific time (HH:MM)",
+            "description": "Use this when the user says 'set alarm', 'wake me up at', 'alarm for', or 'remind me at'. This sets a spoken alarm. Do NOT open any app.",
             "parameters": {
                 "type": "object",
                 "properties": {
