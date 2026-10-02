@@ -2,7 +2,7 @@ import ollama
 from src.memory.database import init_db, save_message, get_messages
 from src.ears.listener import listen, _stream, set_speaking, clear_buffer
 from src.mouth.speaker import speak, wait_until_done
-from src.hands.tools import get_time, get_date, calculate, set_reminder, open_app, read_pdf, TOOLS
+from src.hands.tools import get_time, get_date, calculate, set_reminder, open_app, read_pdf, web_search, read_email, analyze_screen, TOOLS
 from src.hands.reminder import start_reminder_checker
 
 SYSTEM_PROMPT = """You are Remy. You are the user's personal AI assistant.
@@ -50,6 +50,12 @@ def handle_tool_calls(response):
             result = open_app(args.get('app_name', ''))
         elif name == 'read_pdf':
             result = read_pdf(args.get('file_path', ''))
+        elif name == 'web_search':
+            result = web_search(args.get('query', ''))
+        elif name == 'read_email':
+            result = read_email(args.get('count', 5))           
+        elif name == 'analyze_screen':
+            result = analyze_screen()
         else:
             result = "Unknown tool"
 

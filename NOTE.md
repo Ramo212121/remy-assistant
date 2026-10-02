@@ -302,3 +302,49 @@ Daily log of what I learn, build, and debug while creating Remy — a fully loca
 - Web search: working
 - Email: code ready, `.env` pending
 - 8 tools total
+
+---
+
+## Day 14 — Screen Vision (Eyes)
+
+**Difficulty:** 🟠 | **Duration:** ~6h
+
+### What I Did
+- Pulled `moondream` vision model via Ollama
+- Created `analyze_screen()` in `tools.py`
+- Takes screenshot with `screencapture`
+- Base64 encodes image
+- Sends to `moondream` for description
+- Added to `TOOLS` (9 tools total)
+
+### Learned
+- **Vision model** = LLM that understands images
+- **Multimodal** = text + image input
+- **`screencapture -x`** = silent screenshot on macOS
+- **Base64 encode** = image → string for LLM
+- **`images=[...]`** = Ollama vision parameter
+- **`moondream`** = small vision model (~1.7GB), 8GB RAM friendly
+- **`llava:7b`** = bigger (~4.5GB), better quality, but RAM-heavy
+
+### Code
+```python
+import base64
+import ollama
+
+def analyze_screen():
+    try:
+        subprocess.run(["screencapture", "-x", "/tmp/screen.png"], check=True)
+        with open("/tmp/screen.png", "rb") as f:
+            image_data = base64.b64encode(f.read()).decode()
+        response = ollama.chat(
+            model="moondream",
+            messages=[{
+                "role": "user",
+                "content": "What's on this screen? Describe it briefly.",
+                "images": [image_data]
+            }]
+        )
+        return response['message']['content']
+    except Exception as e:
+        return f"Error: {e}"
+

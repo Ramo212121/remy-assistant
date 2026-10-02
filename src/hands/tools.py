@@ -5,11 +5,36 @@ import pymupdf as fitz
 from src.memory.database import save_reminder
 from ddgs import DDGS
 from imapclient import IMAPClient
-
-
+import base64
+import subprocess
+import ollama
 PROJECT_DIR = os.path.expanduser("~/Desktop/MyProjects/remy")
 
 
+
+def analyze_screen():
+    """Take a screenshot and analyze it with vision model."""
+    try:
+        # Ekran görüntüsü al
+        subprocess.run(["screencapture", "-x", "/tmp/screen.png"], check=True)
+        
+        # Base64 encode
+        with open("/tmp/screen.png", "rb") as f:
+            image_data = base64.b64encode(f.read()).decode()
+        
+        # Vision model'e gönder
+        response = ollama.chat(
+            model="moondream",
+            messages=[{
+                "role": "user",
+                "content": "What's on this screen? Describe it briefly.",
+                "images": [image_data]
+            }]
+        )
+        
+        return response['message']['content']
+    except Exception as e:
+        return f"Error: {e}"
 def get_time():
     """Get the current time."""
     now = datetime.now()
@@ -228,6 +253,14 @@ TOOLS = [
                     }
                 }
             }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_screen",
+            "description": "Take a screenshot and describe what's on the screen",
+            "parameters": {"type": "object", "properties": {}}
         }
     }
 ]
