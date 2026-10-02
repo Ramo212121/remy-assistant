@@ -6,35 +6,18 @@ from src.memory.database import save_reminder
 from ddgs import DDGS
 from imapclient import IMAPClient
 import base64
-import subprocess
+import threading
+import time
 import ollama
+
+
 PROJECT_DIR = os.path.expanduser("~/Desktop/MyProjects/remy")
 
 
+# ─────────────────────────────────────────
+# Time / Date / Math
+# ─────────────────────────────────────────
 
-def analyze_screen():
-    """Take a screenshot and analyze it with vision model."""
-    try:
-        # Ekran görüntüsü al
-        subprocess.run(["screencapture", "-x", "/tmp/screen.png"], check=True)
-        
-        # Base64 encode
-        with open("/tmp/screen.png", "rb") as f:
-            image_data = base64.b64encode(f.read()).decode()
-        
-        # Vision model'e gönder
-        response = ollama.chat(
-            model="moondream",
-            messages=[{
-                "role": "user",
-                "content": "What's on this screen? Describe it briefly.",
-                "images": [image_data]
-            }]
-        )
-        
-        return response['message']['content']
-    except Exception as e:
-        return f"Error: {e}"
 def get_time():
     """Get the current time."""
     now = datetime.now()
@@ -56,11 +39,19 @@ def calculate(expression):
         return f"Error: {e}"
 
 
+# ─────────────────────────────────────────
+# Reminders
+# ─────────────────────────────────────────
+
 def set_reminder(remind_at, content):
     """Set a reminder."""
     save_reminder(remind_at, content)
     return f"Reminder set for {remind_at}: {content}"
 
+
+# ─────────────────────────────────────────
+# App Control
+# ─────────────────────────────────────────
 
 def open_app(app_name):
     """Open a macOS application by name."""
@@ -70,6 +61,10 @@ def open_app(app_name):
     except Exception as e:
         return f"Error: {e}"
 
+
+# ─────────────────────────────────────────
+# PDF
+# ─────────────────────────────────────────
 
 def read_pdf(file_path):
     """Read text from a PDF file."""
@@ -86,6 +81,10 @@ def read_pdf(file_path):
     except Exception as e:
         return f"Error: {e}"
 
+
+# ─────────────────────────────────────────
+# Web Search
+# ─────────────────────────────────────────
 
 def web_search(query):
     """Search the web using DuckDuckGo."""
@@ -104,6 +103,10 @@ def web_search(query):
     except Exception as e:
         return f"Error: {e}"
 
+
+# ─────────────────────────────────────────
+# Email
+# ─────────────────────────────────────────
 
 def read_email(count=5):
     """Read latest unread emails from Gmail."""
@@ -132,6 +135,136 @@ def read_email(count=5):
     except Exception as e:
         return f"Error: {e}"
 
+
+# ─────────────────────────────────────────
+# Vision (Screen)
+# ─────────────────────────────────────────
+
+def analyze_screen():
+    """Take a screenshot and analyze it with vision model."""
+    try:
+        subprocess.run(["screencapture", "-x", "/tmp/screen.png"], check=True)
+
+        with open("/tmp/screen.png", "rb") as f:
+            image_data = base64.b64encode(f.read()).decode()
+
+        response = ollama.chat(
+            model="moondream",
+            messages=[{
+                "role": "user",
+                "content": "What's on this screen? Describe it briefly.",
+                "images": [image_data]
+            }]
+        )
+
+        return response['message']['content']
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ─────────────────────────────────────────
+# Volume
+# ─────────────────────────────────────────
+
+def set_volume(level):
+    """Set system volume (0-100)."""
+    try:
+        subprocess.run(
+            ["osascript", "-e", f"set volume output volume {level}"],
+            check=True
+        )
+        return f"Volume set to {level}%"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def mute():
+    """Mute system volume."""
+    try:
+        subprocess.run(
+            ["osascript", "-e", "set volume output muted true"],
+            check=True
+        )
+        return "Muted"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def unmute():
+    """Unmute system volume."""
+    try:
+        subprocess.run(
+            ["osascript", "-e", "set volume output muted false"],
+            check=True
+        )
+        return "Unmuted"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ─────────────────────────────────────────
+# Brightness
+# ─────────────────────────────────────────
+
+def set_brightness(level):
+    """Set screen brightness (0-100)."""
+    try:
+        brightness = level / 100
+        subprocess.run(["brightness", str(brightness)], check=True)
+        return f"Brightness set to {level}%"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ─────────────────────────────────────────
+# System Control
+# ─────────────────────────────────────────
+
+def sleep_mac():
+    """Put Mac to sleep."""
+    try:
+        subprocess.run(
+            ["osascript", "-e", 'tell application "System Events" to sleep'],
+            check=True
+        )
+        return "Sleeping"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def lock_screen():
+    """Lock the screen."""
+    try:
+        subprocess.run([
+            "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
+            "-suspend"
+        ], check=True)
+        return "Screen locked"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ─────────────────────────────────────────
+# Alarm
+# ─────────────────────────────────────────
+
+def set_alarm(alarm_time, message="Wake up!"):
+    """Set an alarm at HH:MM."""
+    def alarm_loop():
+        while True:
+            now = datetime.now().strftime("%H:%M")
+            if now == alarm_time:
+                subprocess.run(["say", message])
+                break
+            time.sleep(30)
+
+    threading.Thread(target=alarm_loop, daemon=True).start()
+    return f"Alarm set for {alarm_time}"
+
+
+# ─────────────────────────────────────────
+# TOOLS (JSON schema for Ollama)
+# ─────────────────────────────────────────
 
 TOOLS = [
     {
@@ -192,13 +325,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "open_app",
-            "description": "Open a macOS application by name",
+            "description": "Open a macOS application by name, like 'Spotify', 'Safari', or 'Visual Studio Code'",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "app_name": {
                         "type": "string",
-                        "description": "App name, e.g. 'Spotify', 'Safari', 'Visual Studio Code'"
+                        "description": "App name"
                     }
                 },
                 "required": ["app_name"]
@@ -261,6 +394,93 @@ TOOLS = [
             "name": "analyze_screen",
             "description": "Take a screenshot and describe what's on the screen",
             "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_volume",
+            "description": "Set system volume (0-100)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "level": {
+                        "type": "integer",
+                        "description": "Volume level 0-100"
+                    }
+                },
+                "required": ["level"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "mute",
+            "description": "Mute system volume",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "unmute",
+            "description": "Unmute system volume",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_brightness",
+            "description": "Set screen brightness (0-100)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "level": {
+                        "type": "integer",
+                        "description": "Brightness level 0-100"
+                    }
+                },
+                "required": ["level"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sleep_mac",
+            "description": "Put Mac to sleep",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lock_screen",
+            "description": "Lock the screen",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_alarm",
+            "description": "Set an alarm at a specific time (HH:MM)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "alarm_time": {
+                        "type": "string",
+                        "description": "Time in HH:MM format, e.g. '07:00'"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Alarm message (default: Wake up!)"
+                    }
+                },
+                "required": ["alarm_time"]
+            }
         }
     }
 ]

@@ -2,18 +2,28 @@ import ollama
 from src.memory.database import init_db, save_message, get_messages
 from src.ears.listener import listen, _stream, set_speaking, clear_buffer
 from src.mouth.speaker import speak, wait_until_done
-from src.hands.tools import get_time, get_date, calculate, set_reminder, open_app, read_pdf, web_search, read_email, analyze_screen, TOOLS
+from src.hands.tools import (
+    get_time, get_date, calculate, set_reminder,
+    open_app, read_pdf, web_search, read_email, analyze_screen,
+    set_volume, mute, unmute, set_brightness, sleep_mac, lock_screen, set_alarm,
+    TOOLS
+)
 from src.hands.reminder import start_reminder_checker
 
 SYSTEM_PROMPT = """You are Remy. You are the user's personal AI assistant.
 You speak English, friendly and concise.
 
 IMPORTANT RULES:
-- When the user says "read PDF" or "read test PDF", use the read_pdf tool with only the filename (e.g. "test.pdf"). Do NOT open Safari or any app.
-- When the user says "open <app>", use the open_app tool.
-- When the user asks for time or date, use get_time or get_date.
-- When the user asks a math question, use calculate.
-- When the user asks to set a reminder, use set_reminder."""
+- "read PDF" → use read_pdf with filename (e.g. "test.pdf"). Do NOT open Safari.
+- "open <app>" → use open_app tool.
+- time/date → get_time / get_date.
+- math → calculate.
+- reminder → set_reminder.
+- "what's on my screen" → analyze_screen.
+- volume/mute → set_volume / mute / unmute.
+- brightness → set_brightness.
+- sleep/lock → sleep_mac / lock_screen.
+- alarm → set_alarm."""
 
 init_db()
 start_reminder_checker()
@@ -53,9 +63,23 @@ def handle_tool_calls(response):
         elif name == 'web_search':
             result = web_search(args.get('query', ''))
         elif name == 'read_email':
-            result = read_email(args.get('count', 5))           
+            result = read_email(args.get('count', 5))
         elif name == 'analyze_screen':
             result = analyze_screen()
+        elif name == 'set_volume':
+            result = set_volume(args.get('level', 50))
+        elif name == 'mute':
+            result = mute()
+        elif name == 'unmute':
+            result = unmute()
+        elif name == 'set_brightness':
+            result = set_brightness(args.get('level', 50))
+        elif name == 'sleep_mac':
+            result = sleep_mac()
+        elif name == 'lock_screen':
+            result = lock_screen()
+        elif name == 'set_alarm':
+            result = set_alarm(args.get('alarm_time', ''), args.get('message', 'Wake up!'))
         else:
             result = "Unknown tool"
 
