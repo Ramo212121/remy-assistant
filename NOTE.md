@@ -348,3 +348,62 @@ def analyze_screen():
     except Exception as e:
         return f"Error: {e}"
 
+---
+
+## Day 15 — System Control + Alarm
+
+**Difficulty:** 🟡 | **Duration:** ~6h
+
+### What I Did
+- Added volume control (`set_volume`, `mute`, `unmute`)
+- Added brightness control (`set_brightness`)
+- Added system control (`sleep_mac`, `lock_screen`)
+- Added alarm (`set_alarm`)
+- Total tools: **16**
+
+### Learned
+- **`osascript -e`** = run AppleScript from terminal
+- **Volume:** `set volume output volume 50`
+- **Mute:** `set volume output muted true`
+- **Sleep:** `tell application "System Events" to sleep`
+- **Lock:** `CGSession -suspend` (native macOS binary)
+- **Brightness:** `brightness` CLI (needs `brew install brightness`)
+- **Alarm:** No native macOS alarm → use `threading` + `say`
+- **Time check loop:** `while True: if now == alarm_time: say(); break`
+- **`daemon=True`** = thread dies with main process
+
+### Code
+```python
+def set_volume(level):
+    subprocess.run(["osascript", "-e", f"set volume output volume {level}"], check=True)
+    return f"Volume set to {level}%"
+
+def mute():
+    subprocess.run(["osascript", "-e", "set volume output muted true"], check=True)
+    return "Muted"
+
+def set_brightness(level):
+    subprocess.run(["brightness", str(level / 100)], check=True)
+    return f"Brightness set to {level}%"
+
+def sleep_mac():
+    subprocess.run(["osascript", "-e", 'tell application "System Events" to sleep'], check=True)
+    return "Sleeping"
+
+def lock_screen():
+    subprocess.run([
+        "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
+        "-suspend"
+    ], check=True)
+    return "Screen locked"
+
+def set_alarm(alarm_time, message="Wake up!"):
+    def alarm_loop():
+        while True:
+            now = datetime.now().strftime("%H:%M")
+            if now == alarm_time:
+                subprocess.run(["say", message])
+                break
+            time.sleep(30)
+    threading.Thread(target=alarm_loop, daemon=True).start()
+    return f"Alarm set for {alarm_time}"
