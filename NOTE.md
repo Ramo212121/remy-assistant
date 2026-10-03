@@ -467,3 +467,82 @@ def set_alarm(alarm_time, message="Wake up!"):
 6. **`osascript`** controls macOS natively
 7. **16 tools** — Remy is a full assistant
 
+
+
+---
+
+## Day 16 — Wake Word ("Hey Jarvis")
+
+**Difficulty:** 🔴 | **Duration:** ~7h
+
+### What I Did
+- Installed `openwakeword` for wake word detection
+- Created `src/ears/wake_word.py`
+- Used TFLite backend (`ai-edge-litert`) instead of ONNX
+- Integrated wake word into `remy.py`
+- Fixed double response bug
+- Total: 16 tools + wake word
+
+### Learned
+- **Wake word** = trigger phrase to activate assistant
+- **openWakeWord** = free, open-source wake word engine
+- **TFLite vs ONNX on macOS ARM64:**
+  - ONNX → low scores (0.05-0.14), unreliable
+  - TFLite (ai-edge-litert) → high scores (0.43-0.97), works
+- **Threshold tuning:** 0.35 works well
+- **Stream lifecycle:** `stream.start()` + `stream.stop()` manually
+- **Circular import:** never import your own file
+
+### Code
+```python
+# wake_word.py
+import openwakeword
+from openwakeword.model import Model
+import sounddevice as sd
+import numpy as np
+
+_model = None
+THRESHOLD = 0.35
+
+def _load_model():
+    global _model
+    if _model is None:
+        _model = Model(
+            wakeword_models=["hey_jarvis"],
+            inference_framework="tflite"
+        )
+    return _model
+
+def wait_for_wake_word(timeout=30):
+    model = _load_model()
+    print("💤 Waiting for wake word...")
+    detected = False
+    stream = None
+
+    def callback(indata, frames, time, status):
+        nonlocal detected
+        if detected:
+            return
+        audio = (indata[:, 0] * 32767).astype(np.int16)
+        prediction = model.predict(audio)
+        for name, score in prediction.items():
+            if score > THRESHOLD:
+                print(f"🎯 Wake word detected: {name} ({score:.2f})")
+                detected = True
+
+    try:
+        stream = sd.InputStream(callback=callback, channels=1, samplerate=16000, device=0)
+        stream.start()
+        elapsed = 0
+        while not detected and elapsed < timeout * 10:
+            sd.sleep(100)
+            elapsed += 1
+    finally:
+        if stream is not None:
+            stream.stop()
+            stream.close()
+
+    return detected
+
+
+
