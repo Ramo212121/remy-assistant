@@ -1,6 +1,9 @@
+import os
 import ollama
+from groq import Groq
 from src.memory.database import init_db, save_message, get_messages
 from src.ears.listener import listen, _stream, set_speaking, clear_buffer
+from src.ears.wake_word import wait_for_wake_word
 from src.mouth.speaker import speak, wait_until_done
 from src.hands.tools import (
     get_time, get_date, calculate, set_reminder,
@@ -13,14 +16,18 @@ from src.hands.reminder import start_reminder_checker
 SYSTEM_PROMPT = """You are Remy. You are the user's personal AI assistant.
 You speak English, friendly and concise.
 
+WAKE WORD: The user says "Hey Jarvis" to wake you up.
+After waking, listen for the actual command.
+
 IMPORTANT RULES — follow these strictly:
+- time/date → get_time / get_date ONLY. Do NOT call set_volume or other tools.
+- "what time is it" → get_time ONLY.
+- "volume" → set_volume ONLY if user explicitly says "volume" or "sound".
 - "read PDF" → use read_pdf with filename. Do NOT open Safari.
 - "open <app>" → use open_app tool ONLY when user says "open" or "launch".
-- time/date → get_time / get_date.
 - math → calculate.
 - reminder → set_reminder.
 - "what's on my screen" → analyze_screen.
-- volume/mute → set_volume / mute / unmute.
 - brightness → set_brightness.
 - sleep/lock → sleep_mac / lock_screen.
 - "set alarm" / "wake me up" → use set_alarm tool. NEVER use open_app for alarm.
@@ -96,6 +103,11 @@ def handle_tool_calls(response):
 
 try:
     while True:
+        # Wake word bekle
+        if not wait_for_wake_word(timeout=60):
+            continue
+
+        print("🎤 Listening...")
         user_input = listen()
 
         if not user_input or user_input.strip().lower() in ['quit', 'exit', 'q', 'stop', 'goodbye', 'bye']:
@@ -112,14 +124,34 @@ try:
 
         print("⏳ Thinking...")
         response = ollama.chat(model='qwen2.5:3b', messages=messages, tools=TOOLS)
+
+        # Tool call varsa işle
         if response['message'].get('tool_calls'):
             tool_results = handle_tool_calls(response)
-            messages.append(response['message'])
+            messages.append({
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': response['message']['tool_calls']
+            })
             messages.extend(tool_results)
             response = ollama.chat(model='qwen2.5:3b', messages=messages, tools=TOOLS)
 
         reply = response['message']['content']
-        print(f"🔊 Remy: {reply}")
+
+        # Boş cevap kontrolü
+        if not reply or not reply.strip():
+            reply = "Done."
+
+        # Aynı cümle iki kere mi? (dedupe)
+        sentences = reply.split('. ')
+        unique = []
+        for s in sentences:
+            s = s.strip()
+            if s and s not in unique:
+                unique.append(s)
+        reply = '. '.join(unique)
+
+        # Sadece speaker yazdırsın (remy.py'de print yok)
         speak(reply)
 
         wait_until_done()
