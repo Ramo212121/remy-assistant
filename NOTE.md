@@ -407,3 +407,63 @@ def set_alarm(alarm_time, message="Wake up!"):
             time.sleep(30)
     threading.Thread(target=alarm_loop, daemon=True).start()
     return f"Alarm set for {alarm_time}"
+
+
+---
+
+## Day 15 — System Control + Alarm + Performance
+
+**Difficulty:** 🟡 | **Duration:** ~7h
+
+### What I Did
+- Added volume control (`set_volume`, `mute`, `unmute`)
+- Added brightness (`set_brightness`)
+- Added system control (`sleep_mac`, `lock_screen`)
+- Added alarm (`set_alarm`)
+- **Performance fix:** Switched from `qwen2.5:7b` to `qwen2.5:3b`
+- Set `OLLAMA_KEEP_ALIVE=30s`
+- Total tools: **16**
+
+### Learned
+- **`osascript -e`** = run AppleScript from terminal
+- **Volume:** `set volume output volume 50`
+- **Sleep:** `tell application "System Events" to sleep`
+- **Lock:** `CGSession -suspend`
+- **Brightness:** `brightness` CLI (`brew install brightness`)
+- **Alarm:** `threading` + `say`
+- **`daemon=True`** = thread dies with main process
+
+### Performance Problem
+- **8GB RAM not enough** for `qwen2.5:7b` (4.6GB)
+- Mac froze due to swap
+- **Fix 1:** `qwen2.5:3b` (~2GB) — saves ~2.6GB
+- **Fix 2:** `OLLAMA_KEEP_ALIVE=30s` — model unloads after 30s
+- **Result:** Mac no longer freezes
+
+### Problems
+- **Alarm → opened Safari** — LLM called `open_app`
+  - Fix: Stronger tool descriptions + system prompt
+- **`TOOLSfrom` syntax error** — two imports on one line
+  - Fix: Split into two lines
+- **`set_brightness` missing** from import + handler
+  - Fix: Added both
+- **`PaMacCore Error -9986`** — CoreAudio locked
+  - Fix: `sudo killall coreaudiod`
+
+### Results
+- Volume/mute/brightness: OK
+- Sleep/lock: OK
+- Alarm: OK
+- LLM picks correct tool: yes
+- Mac no longer freezes: **yes**
+- Total tools: **16**
+
+### Key Takeaways
+1. **8GB RAM is tight** — use 3b model, not 7b
+2. **`OLLAMA_KEEP_ALIVE=30s`** frees RAM
+3. **Tool descriptions must be explicit** — LLM follows literally
+4. **System prompt rules** override confusion
+5. **`sudo killall coreaudiod`** fixes audio lock
+6. **`osascript`** controls macOS natively
+7. **16 tools** — Remy is a full assistant
+
