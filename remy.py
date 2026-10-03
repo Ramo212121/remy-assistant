@@ -111,13 +111,12 @@ try:
         set_speaking(True)
 
         print("⏳ Thinking...")
-        response = ollama.chat(model='qwen2.5:7b', messages=messages, tools=TOOLS)
-
+        response = ollama.chat(model='qwen2.5:3b', messages=messages, tools=TOOLS)
         if response['message'].get('tool_calls'):
             tool_results = handle_tool_calls(response)
             messages.append(response['message'])
             messages.extend(tool_results)
-            response = ollama.chat(model='qwen2.5:7b', messages=messages, tools=TOOLS)
+            response = ollama.chat(model='qwen2.5:3b', messages=messages, tools=TOOLS)
 
         reply = response['message']['content']
         print(f"🔊 Remy: {reply}")
