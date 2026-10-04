@@ -546,3 +546,54 @@ def wait_for_wake_word(timeout=30):
 
 
 
+---
+
+## Day 17 — Groq LLM Migration
+
+**Difficulty:** 🟡 | **Duration:** ~4h
+
+### What I Did
+- Migrated from local `qwen2.5:3b` (Ollama) to **Groq API**
+- Model: `openai/gpt-oss-120b` (replaced deprecated `llama-3.3-70b-versatile`)
+- Updated `remy.py` for Groq's OpenAI-compatible format
+- Fixed response handling (`response.choices[0].message`)
+- Fixed tool call format (`call.function.arguments` as JSON string)
+- Added `tool_call_id` to tool results
+
+### Learned
+- **Groq** = cloud LLM, OpenAI-compatible API
+- **Model deprecation:** `llama-3.3-70b-versatile` removed Aug 2026
+- **New models:** `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3-32b`
+- **Response format:**
+  - Ollama: `response['message']['content']`
+  - Groq: `response.choices[0].message.content`
+- **Tool calls:**
+  - Ollama: `call.function.name`, `call.function.arguments` (dict)
+  - Groq: `call.function.name`, `call.function.arguments` (JSON string), `call.id`
+- **Tool result format:** needs `tool_call_id` for Groq
+
+### Code
+```python
+# Groq client
+from groq import Groq
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# Chat call
+response = groq_client.chat.completions.create(
+    model='openai/gpt-oss-120b',
+    messages=messages,
+    tools=TOOLS
+)
+
+# Tool calls
+msg = response.choices[0].message
+if msg.tool_calls:
+    for call in msg.tool_calls:
+        name = call.function.name
+        args = json.loads(call.function.arguments or "{}")
+        # execute tool
+        results.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": result
+        })

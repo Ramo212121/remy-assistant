@@ -1,6 +1,7 @@
 import os
-import ollama
+import json
 from groq import Groq
+from dotenv import load_dotenv
 from src.memory.database import init_db, save_message, get_messages
 from src.ears.listener import listen, _stream, set_speaking, clear_buffer
 from src.ears.wake_word import wait_for_wake_word
@@ -12,6 +13,9 @@ from src.hands.tools import (
     TOOLS
 )
 from src.hands.reminder import start_reminder_checker
+
+load_dotenv()
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 SYSTEM_PROMPT = """You are Remy. You are the user's personal AI assistant.
 You speak English, friendly and concise.
@@ -48,13 +52,13 @@ print("-" * 40)
 
 
 def handle_tool_calls(response):
-    """Execute tool calls and return results."""
-    tool_calls = response['message'].get('tool_calls', [])
+    """Execute tool calls and return results (Groq format)."""
+    tool_calls = response.choices[0].message.tool_calls
     results = []
 
     for call in tool_calls:
         name = call.function.name
-        args = call.function.arguments
+        args = json.loads(call.function.arguments or "{}")
 
         if name == 'get_time':
             result = get_time()
@@ -94,8 +98,9 @@ def handle_tool_calls(response):
         print(f"🛠️ Tool: {name} → {result[:100]}")
 
         results.append({
-            'role': 'tool',
-            'content': result
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": result
         })
 
     return results
@@ -123,24 +128,32 @@ try:
         set_speaking(True)
 
         print("⏳ Thinking...")
-        response = ollama.chat(model='qwen2.5:3b', messages=messages, tools=TOOLS)
+        response = groq_client.chat.completions.create(
+            model='openai/gpt-oss-120b',
+            messages=messages,
+            tools=TOOLS
+        )
+
+        msg = response.choices[0].message
 
         # Tool call varsa işle
-        if response['message'].get('tool_calls'):
+        if msg.tool_calls:
             tool_results = handle_tool_calls(response)
             messages.append({
-                'role': 'assistant',
-                'content': None,
-                'tool_calls': response['message']['tool_calls']
+                "role": "assistant",
+                "content": None,
+                "tool_calls": msg.tool_calls
             })
             messages.extend(tool_results)
-            response = ollama.chat(model='qwen2.5:3b', messages=messages, tools=TOOLS)
 
-        reply = response['message']['content']
+            response = groq_client.chat.completions.create(
+                model='openai/gpt-oss-120b',
+                messages=messages,
+                tools=TOOLS
+            )
+            msg = response.choices[0].message
 
-        # Boş cevap kontrolü
-        if not reply or not reply.strip():
-            reply = "Done."
+        reply = msg.content or "Done."
 
         # Aynı cümle iki kere mi? (dedupe)
         sentences = reply.split('. ')
@@ -151,7 +164,6 @@ try:
                 unique.append(s)
         reply = '. '.join(unique)
 
-        # Sadece speaker yazdırsın (remy.py'de print yok)
         speak(reply)
 
         wait_until_done()
