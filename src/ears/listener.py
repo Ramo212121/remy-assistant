@@ -68,7 +68,7 @@ def record_audio(filename="temp.flac", duration=DURATION):
 
 
 # --- VAD (Voice Activity Detection) ---
-def listen_vad(language="en", max_duration=15, silence_duration=1.0, min_speech_frames=5):
+def listen_vad(language="en", max_duration=15, silence_duration=1.0, min_speech_frames=3):
     """    Record until silence detected (VAD) with strict noise filtering.
     
     Args:
