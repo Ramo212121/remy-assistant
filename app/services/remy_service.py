@@ -1,8 +1,9 @@
-"""Remy voice backend integration."""
+"""Remy voice backend integration with tool calling."""
 import sys
 import threading
 import subprocess
 import os
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 from groq import Groq
@@ -15,8 +16,114 @@ groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 _listening = False
 
-# Exit commands
 EXIT_COMMANDS = ["bye jarvis", "goodbye jarvis", "exit", "stop", "sleep", "goodbye"]
+
+
+def handle_tool_calls(response, on_status=None):
+    """Execute tool calls from Groq response."""
+    from src.hands.tools import (
+        get_time, get_date, calculate, set_reminder,
+        open_app, read_pdf, web_search, read_email, analyze_screen,
+        set_volume, mute, unmute, set_brightness, sleep_mac, lock_screen, set_alarm,
+    )
+    
+    tool_calls = response.choices[0].message.tool_calls
+    results = []
+    
+    for call in tool_calls:
+        name = call.function.name
+        try:
+            args = json.loads(call.function.arguments or "{}")
+        except:
+            args = {}
+        
+        print(f"🛠️ Tool: {name} → {args}")
+        
+        if name == 'get_time':
+            result = get_time()
+        elif name == 'get_date':
+            result = get_date()
+        elif name == 'calculate':
+            result = calculate(args.get('expression', ''))
+        elif name == 'set_reminder':
+            result = set_reminder(args.get('remind_at', ''), args.get('content', ''))
+        elif name == 'open_app':
+            result = open_app(args.get('app_name', ''))
+        elif name == 'read_pdf':
+            result = read_pdf(args.get('file_path', ''))
+        elif name == 'web_search':
+            result = web_search(args.get('query', ''))
+        elif name == 'read_email':
+            result = read_email(args.get('count', 5))
+        elif name == 'analyze_screen':
+            result = analyze_screen()
+        elif name == 'set_volume':
+            result = set_volume(args.get('level', 50))
+        elif name == 'mute':
+            result = mute()
+        elif name == 'unmute':
+            result = unmute()
+        elif name == 'set_brightness':
+            result = set_brightness(args.get('level', 50))
+        elif name == 'sleep_mac':
+            result = sleep_mac()
+        elif name == 'lock_screen':
+            result = lock_screen()
+        elif name == 'set_alarm':
+            result = set_alarm(args.get('alarm_time', ''), args.get('message', 'Wake up!'))
+        else:
+            result = "Unknown tool"
+        
+        print(f"🛠️ Result: {result[:80]}")
+        
+        results.append({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": str(result)
+        })
+    
+    return results
+
+
+def chat_with_tools(user_text, messages_history, on_status=None):
+    """Chat with LLM + tool calling."""
+    from src.hands.tools import TOOLS
+    
+    if on_status:
+        on_status("⏳ Thinking...")
+    
+    # İlk çağrı
+    response = groq_client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=messages_history,
+        tools=TOOLS,
+        tool_choice="auto"
+    )
+    
+    msg = response.choices[0].message
+    
+    # Tool call var mı?
+    if msg.tool_calls:
+        tool_results = handle_tool_calls(response, on_status)
+        
+        # Tool sonuçlarını geçmişe ekle
+        messages_history.append({
+            "role": "assistant",
+            "content": None,
+            "tool_calls": msg.tool_calls
+        })
+        messages_history.extend(tool_results)
+        
+        # Tekrar LLM'e gönder
+        response = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=messages_history,
+            tools=TOOLS
+        )
+        msg = response.choices[0].message
+    
+    reply = msg.content or "Done."
+    return reply
 
 
 def start_wake_word_loop(on_result=None, on_status=None):
@@ -54,6 +161,11 @@ def start_wake_word_loop(on_result=None, on_status=None):
                 set_speaking(False)
                 clear_buffer()
 
+                # Konuşma geçmişi
+                messages_history = [
+                    {"role": "system", "content": "You are Remy, a helpful voice assistant. Keep answers short and friendly. Use tools when needed."}
+                ]
+
                 # 3. Continuous listening
                 while _listening:
                     user_text = listen()
@@ -62,7 +174,7 @@ def start_wake_word_loop(on_result=None, on_status=None):
 
                     print(f"DEBUG: user_text={user_text}")
 
-                    # "Bye Jarvis" said?
+                    # Exit command?
                     if any(cmd in user_text.lower() for cmd in EXIT_COMMANDS):
                         print("DEBUG: Exit command detected")
                         if on_status:
@@ -71,21 +183,17 @@ def start_wake_word_loop(on_result=None, on_status=None):
                         wait_until_done()
                         set_speaking(False)
                         clear_buffer()
-                        break  # Exit conversation mode
+                        break
 
-                    if on_status:
-                        on_status("⏳ Thinking...")
+                    # Kullanıcı mesajını geçmişe ekle
+                    messages_history.append({"role": "user", "content": user_text})
 
-                    # LLM
-                    response = groq_client.chat.completions.create(
-                        model="openai/gpt-oss-120b",
-                        messages=[
-                            {"role": "system", "content": "You are Remy, a helpful voice assistant. Keep answers short and friendly."},
-                            {"role": "user", "content": user_text}
-                        ]
-                    )
-                    reply = response.choices[0].message.content
+                    # LLM + tool calling
+                    reply = chat_with_tools(user_text, messages_history, on_status)
                     print(f"DEBUG: reply={reply}")
+
+                    # Cevabı geçmişe ekle
+                    messages_history.append({"role": "assistant", "content": reply})
 
                     if on_status:
                         on_status("🔊 Speaking...")
@@ -120,7 +228,7 @@ def stop_wake_word_loop():
 
 
 def voice_chat(on_result=None, on_status=None):
-    """One-shot voice chat (manual button)."""
+    """One-shot voice chat with tool calling."""
     def run():
         try:
             from src.ears.listener import listen, set_speaking, clear_buffer
@@ -138,14 +246,12 @@ def voice_chat(on_result=None, on_status=None):
             if on_status:
                 on_status("⏳ Thinking...")
 
-            response = groq_client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=[
-                    {"role": "system", "content": "You are Remy, a helpful voice assistant. Keep answers short and friendly."},
-                    {"role": "user", "content": user_text}
-                ]
-            )
-            reply = response.choices[0].message.content
+            messages_history = [
+                {"role": "system", "content": "You are Remy, a helpful voice assistant. Keep answers short and friendly. Use tools when needed."},
+                {"role": "user", "content": user_text}
+            ]
+
+            reply = chat_with_tools(user_text, messages_history, on_status)
 
             if on_status:
                 on_status("🔊 Speaking...")
