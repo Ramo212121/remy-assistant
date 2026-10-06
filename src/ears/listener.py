@@ -3,6 +3,7 @@ import time
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+import webrtcvad
 from pathlib import Path
 from groq import Groq
 from dotenv import load_dotenv
@@ -16,7 +17,7 @@ DURATION = 5
 SAMPLE_RATE = 16000
 CHANNELS = 1
 VOICE_PROFILE = "voice_profile.npy"
-SIMILARITY_THRESHOLD = 0.35
+SIMILARITY_THRESHOLD = 0.45
 
 # --- Globals ---
 _stream = None
@@ -65,6 +66,82 @@ def record_audio(filename="temp.flac", duration=DURATION):
     print("✅ Recording finished")
     return filename
 
+
+# --- VAD (Voice Activity Detection) ---
+def listen_vad(language="en", max_duration=15, silence_duration=1.0, min_speech_frames=5):
+    """    Record until silence detected (VAD) with strict noise filtering.
+    
+    Args:
+        max_duration: maximum recording time
+        silence_duration: silence after speech to stop
+        min_speech_frames: minimum speech frames required (filters noise)
+    """
+    global is_speaking
+    
+    if is_speaking:
+        print("🤐 Remy konuşuyor, mikrofon kapalı")
+        time.sleep(0.5)
+        return ""
+    
+    vad = webrtcvad.Vad(3)  # En agresif
+    sample_rate = SAMPLE_RATE
+    frame_duration_ms = 30
+    frame_size = int(sample_rate * frame_duration_ms / 1000)
+
+    stream = _get_stream()
+    
+    # Buffer temizle
+    clear_buffer()
+    
+    print("🎤 Listening... (speak now)")
+
+    recording = []
+    silent_frames = 0
+    speech_frames = 0
+    max_silent_frames = int(silence_duration * 1000 / frame_duration_ms)
+    max_frames = int(max_duration * 1000 / frame_duration_ms)
+    speech_started = False
+
+    for _ in range(max_frames):
+        frame, overflowed = stream.read(frame_size)
+        audio_bytes = (frame[:, 0] * 32767).astype(np.int16).tobytes()
+
+        is_speech = vad.is_speech(audio_bytes, sample_rate)
+
+        if is_speech:
+            speech_started = True
+            speech_frames += 1
+            silent_frames = 0
+        else:
+            silent_frames += 1
+
+        if speech_started:
+            recording.append(frame)
+
+        if speech_started and silent_frames > max_silent_frames:
+            print("✅ Speech ended")
+            break
+
+    # Minimum konuşma kontrolü
+    if speech_frames < min_speech_frames:
+        print(f"❌ Too short ({speech_frames} frames) — ignoring")
+        return ""
+
+    if not recording:
+        print("❌ No speech detected")
+        return ""
+
+    audio = np.concatenate(recording, axis=0)
+    filename = "temp.flac"
+    sf.write(filename, audio, sample_rate)
+
+    # Speaker verification
+    if not is_my_voice(filename):
+        print("🤐 Not my voice, ignoring...")
+        return ""
+
+    text = transcribe(filename)
+    return text
 
 # --- Speaker Verification ---
 def _load_encoder():
@@ -116,11 +193,15 @@ def transcribe(filename, language="en"):
     return result
 
 
-def listen(duration=DURATION, language="en"):
+def listen(duration=DURATION, language="en", use_vad=True):
+    """Listen with VAD — stops when silence detected."""
     global is_speaking
     if is_speaking:
         time.sleep(0.5)
         return ""
+
+    if use_vad:
+        return listen_vad(language=language)
 
     filename = record_audio(duration=duration)
 

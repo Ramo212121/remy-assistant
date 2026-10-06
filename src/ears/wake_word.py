@@ -4,7 +4,7 @@ import sounddevice as sd
 import numpy as np
 
 _model = None
-THRESHOLD = 0.35
+THRESHOLD = 0.5
 
 
 def _load_model():
@@ -23,21 +23,31 @@ def wait_for_wake_word(timeout=30):
     print("💤 Waiting for wake word...")
     detected = False
     stream = None
+    consecutive_hits = 0
 
     def callback(indata, frames, time, status):
-        nonlocal detected
+        nonlocal detected, consecutive_hits
         if detected:
             return
-
         audio = (indata[:, 0] * 32767).astype(np.int16)
         prediction = model.predict(audio)
         for name, score in prediction.items():
             if score > THRESHOLD:
-                print(f"🎯 Wake word detected: {name} ({score:.2f})")
-                detected = True
+                consecutive_hits += 1
+                print(f"🎯 Hit {consecutive_hits}/3: {name} ({score:.2f})")
+                if consecutive_hits >= 3:
+                    print(f"✅ Wake word confirmed: {name}")
+                    detected = True
+            else:
+                consecutive_hits = 0
 
     try:
-        stream = sd.InputStream(callback=callback, channels=1, samplerate=16000, device=0)
+        stream = sd.InputStream(
+            callback=callback,
+            channels=1,
+            samplerate=16000,
+            device=0
+        )
         stream.start()
 
         elapsed = 0
