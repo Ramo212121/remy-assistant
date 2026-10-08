@@ -1,28 +1,61 @@
-# Secrets
-.env
-.env.*
-
-# Python cache
+cat > .gitignore << 'EOF'
+# ─── Python ───
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
 
-# macOS
-.DS_Store
+# ─── Virtual environment ───
+venv/
+.venv/
+env/
 
-# Models
+# ─── Environment ───
+.env
+.env.local
+.env.*.local
+
+# ─── Voice profile (personal) ───
+voice_profile.npy
+*.npy
+
+# ─── Local database ───
+remy.db
+*.db
+
+# ─── Piper voice models (too big) ───
 *.onnx
 *.onnx.json
 
-# Temp audio
-temp_*.wav
+# ─── Temp audio ───
 temp.flac
-test.wav
 temp_speech_*.wav
+temp_*.wav
 
-# Backup
-remy_backup.py
+# ─── Backups ───
+*.bak
+*.save
+*.old
 
-# Personal data
-voice_profile.npy
-my_voice.wav
-remy.db
+# ─── Test files ───
+test_*.py
+*_test.py
+
+# ─── macOS ───
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── Logs ───
+*.log
+EOF
