@@ -1,599 +1,387 @@
-# Remy Development Notes
-
-Daily log of what I learn, build, and debug while creating Remy — a fully local, privacy-first AI voice assistant for macOS.
+İşte kanka, **İngilizce ve daha kısa** versiyonu:
 
 ---
 
-## Day 1 — Ollama Setup
+## `NOTE.md` (English, Concise)
 
-**Difficulty:** 🟡 | **Duration:** ~3h
+```markdown
+# NOTE.md
 
-### What I Did
-- Installed Homebrew + Ollama
-- Started Ollama service
-- Pulled `qwen2.5:7b` model
-- Tested from terminal
-
-### Learned
-- **LLM** = brain, **Ollama** = local runtime, **Model** = trained file
-- `brew` = apps, `pip` = Python packages
-
-### Problems
-- `brew` not in PATH → added
-- Mac froze (8GB RAM) → shortened `OLLAMA_KEEP_ALIVE`
+> **Developer Notes** — internal architecture, technical decisions, known issues, and roadmap.
+>
+> This file is more candid and technical than the README. It's a behind-the-scenes guide for contributors.
 
 ---
 
-## Day 2 — Python + Ollama
+## 📌 Project Goal
 
-**Difficulty:** 🟢 | **Duration:** ~3h
+Remy is a **fully local, privacy-first** voice assistant for macOS.
 
-### What I Did
-- Created project folder + `venv`
-- `pip install ollama`
-- Wrote `remy.py` (chat loop)
+**Why it exists:**
+- No dependency on cloud assistants (Alexa, Siri, Google)
+- No data leakage — your voice stays yours
+- Fast (< 1s first audio) and natural interaction
 
-### Learned
-- **venv** = isolated Python env
-- **`ollama.chat()`** = send messages to model
-- **messages list** = memory
-- **system prompt** = personality
+**Target user:** macOS developers who care about privacy and Python.
 
 ---
 
-## Day 3 — Persistent Memory (SQLite)
+## 🧠 Design Decisions
 
-**Difficulty:** 🟡 | **Duration:** ~5h
+### Why Groq?
 
-### What I Did
-- Created `src/memory/database.py`
-- Tables: `messages`, `facts`
-- Functions: `init_db`, `save_message`, `get_messages`, `save_fact`, `get_fact`
-- Integrated into `remy.py`
+| Criteria | Groq | OpenAI | Local (Ollama) |
+|---|---|---|---|
+| **Speed** | ⚡ ~800 tok/s | 🐢 ~100 tok/s | 🐌 ~20–50 tok/s |
+| **Free tier** | ✅ Yes | ❌ No | ✅ Yes |
+| **Tool calling** | ✅ Excellent | ✅ Excellent | ⚠️ Model-dependent |
+| **Privacy** | ⚠️ Cloud | ❌ Cloud | ✅ Local |
 
-### Learned
-- **SQLite** = file-based DB, built into Python
-- **Cursor** = executes SQL
-- **`?` placeholder** = prevents SQL injection
-- **`commit()`** = saves changes
-- **`INSERT OR REPLACE`** = upsert
+**Decision:** Groq for speed + free tier + reliable tool calling. Local mode is planned (Roadmap).
 
-### Problems
-- `ImportError` → Python cache → `rm -rf __pycache__`
-- `tutorial.py` typo → renamed
+### Why `gpt-oss-120b`?
 
----
+- Fast (MoE — only ~3.6B active params)
+- Stable tool calling (small 7B models hallucinate arguments)
+- Good in English and Turkish
+- Free on Groq
 
-## Day 4 — Speech Recognition (Ears)
+**Alternatives tested:**
+- `llama-3.3-70b-versatile` — slower, weaker tool calling
+- `qwen2.5:7b` (Ollama) — fast but unreliable tool calls
+- `gemma3` — no tool calling support
 
-**Difficulty:** 🟠 | **Duration:** ~5h
+### Why Streaming TTS?
 
-### What I Did
-- `pip install groq sounddevice soundfile`
-- Created `test_stt.py`
-- Record 5s → FLAC → Groq Whisper → text
+**Blocking (old):**
+```
+User asks → LLM produces full reply (2–3s) → TTS starts (1s)
+Total: 3–4s delay
+```
 
-### Learned
-- **STT** = Speech-to-Text
-- **Whisper** = OpenAI's STT model (99 languages)
-- **Groq Whisper** = free, fast (216x), no RAM
-- **FLAC** = lossless, ~50% smaller than WAV
-- **16 kHz mono** = what Whisper wants
+**Streaming (current):**
+```
+User asks → LLM produces first sentence (0.5s) → TTS starts
+Total: 0.5–1s delay
+```
 
-### Problems
-- API key shown once → create new
-- `.env` missing → created
-- Mic permission → System Settings
+**Key trick:** Flush the buffer to TTS as soon as a sentence terminator (`.`, `!`, `?`, `…`) appears.
 
----
+### Why Piper?
 
-## Day 5 — Text-to-Speech (Mouth)
+- Offline — no internet needed
+- Fast — real-time even on CPU
+- Free — no license issues
+- Quality — `en_US-ryan-high` sounds natural
 
-**Difficulty:** 🟠 | **Duration:** ~6h
+**Alternatives:**
+- `edge-tts` → natural but requires internet
+- macOS `say` → free but very robotic
+- Kokoro → natural but heavier
 
-### What I Did
-- Installed Piper TTS
-- Downloaded `en_US-ryan-high.onnx`
-- Created `src/mouth/speaker.py`
-- `clean_text_for_tts()` + `speak()`
-- First voice conversation!
+### Why Flet?
 
-### Learned
-- **Piper** = neural TTS, local, free
-- **`high` model** > `low` model (quality)
-- **CoreAudio conflict:** `afplay` + `sounddevice` clash
-- **Fix:** `time.sleep(0.5)` + `afplay`
+- Write in Python — no new language
+- Desktop + mobile + web from one codebase
+- Modern UI (Flutter-based, smooth)
+- Hot reload for fast iteration
 
-### Problems
-- AirPods made conflict worse → use Mac speakers
-- `sd.play()` crashed → use `afplay`
-- Piper read markdown → regex cleaning
+**Alternatives:**
+- PyQt → great desktop, no mobile
+- Kivy → good mobile, dated UI
+- BeeWare → native but hard to set up
 
 ---
 
-## Day 6 — Speed Optimization (Streaming)
+## 🏗️ Architecture Choices
 
-**Difficulty:** 🟠 | **Duration:** ~5h
+### Layered: Ears → Brain → Hands → Mouth
 
-### What I Did
-- Added `stream=True` to `ollama.chat()`
-- Sentence buffering (send to TTS per sentence)
-- `len > 30` check to avoid splitting
+```
+User voice → Ears (STT) → Brain (LLM) → Hands (tools) → Mouth (TTS) → User
+```
 
-### Learned
-- **Streaming** = token by token (instant feel)
-- **Sentence buffer** = group tokens into speakable chunks
-- **Threading** = TTS in background
+**Why:**
+- Each layer is independently testable
+- Swapping one layer (e.g., Groq → Ollama) doesn't affect others
+- Readable code
 
-### Results
-- First sound: 1-2s (was 5-10s)
-- Sentence splitting fixed
+### Why SQLite?
 
----
+- No dependency — built into Python
+- Lightweight — single file (`remy.db`)
+- Good enough — messages, reminders, facts
+- Easy backup — copy the `.db` file
 
-## Day 7 — Echo + Crash Fixes
+### Why Tool Calling?
 
-**Difficulty:** 🟠 | **Duration:** ~6h
+**Regex approach:** "what time" → `get_time()`
+- ❌ Fragile, breaks with phrasing changes
+- ❌ Can't handle complex commands
 
-### What I Did
-- Added `set_speaking()` flag
-- Added `clear_buffer()`
-- Speech queue (`queue.Queue`)
-- `wait_until_done()`
+**Intent classification:** Separate model for intent
+- ❌ Extra model, extra latency
+- ❌ Hard to maintain
 
-### Learned
-- **Echo:** Remy hears itself → replies to itself
-- **`set_speaking`** = pause mic without stopping stream
-- **Never `stop()`/`start()`** stream on macOS (crashes)
-- **Speech queue** = only one `afplay` at a time
-- **`wait_until_done()`** = TTS finishes before mic reopens
-
-### Results
-- Echo: fixed
-- `afplay` crash: fixed
-- Double print: fixed
-- Stable!
+**Tool calling (current):** The LLM decides
+- ✅ Natural language flexible
+- ✅ Easy to add tools
+- ✅ Supports multi-step tasks
 
 ---
 
-## Day 8 — Speaker Recognition
+## ⚠️ Known Issues
 
-**Difficulty:** 🟠 | **Duration:** ~6h
+### 1. STT Mishears Words
 
-### What I Did
-- `pip install resemblyzer`
-- Created `enroll.py` (record voice)
-- `voice_profile.npy` saved
-- `is_my_voice()` in `listener.py`
+**Example:**
+```
+User: "Tell me a joke"
+Whisper: "a joke tell me a joke"
+```
 
-### Learned
-- **Speaker Verification** = only my voice
-- **Voice embedding** = 256-dim vector
-- **Enrollment** = record once, verify forever
-- **Cosine similarity** = compare voice match
-- **Threshold** = 0.55 (tuned)
-- **`setuptools<82`** needed for `webrtcvad`
+**Cause:** Turkish-accented English + Whisper's language model.
 
-### Results
-- My voice: accepted (~0.68)
-- Others: rejected (~0.60)
-- Remy ignores non-user voices
-
----
-
-## Day 9 — Barge-in (Interrupt)
-
-**Difficulty:** 🔴 | **Duration:** ~6h
-
-### What I Did
-- Added `_listen_for_interrupt()` to `speaker.py`
-- `INTERRUPT_THRESHOLD = 0.25`
-- `proc.terminate()` to stop `afplay`
-
-### Learned
-- **Barge-in** = interrupt assistant while speaking
-- **RMS volume** = `np.linalg.norm(indata) / len(indata)`
-- **Threshold tuning:**
-  - Silent: 0.001-0.005
-  - Remy's own voice: 0.05-0.15
-  - User speaking: 0.15-0.25
-- **`sd.CallbackStop`** = exit stream cleanly
-
-### Results
-- Barge-in working
-- Remy stops when user speaks
-- Remy doesn't interrupt itself
-
----
-
-## Day 10 — Tool Calling
-
-**Difficulty:** 🟠 | **Duration:** ~6h
-
-### What I Did
-- Created `src/hands/tools.py`
-- Functions: `get_time`, `get_date`, `calculate`
-- `TOOLS` JSON schema
-- Tool call loop in `remy.py`
-
-### Learned
-- **Tool Calling** = LLM calls Python functions
-- **JSON schema** = describes each tool
-- **`tools=TOOLS`** = enables tool calling
-- **`tool_calls`** = model wants a function
-- **Loop:** call → execute → append → re-call
-- **`ToolCall` object** = use `.function.name`
-
-### Results
-- Time, date, calculate all work
-- 3 tools total
-
----
-
-## Day 11 — Reminder System
-
-**Difficulty:** 🟡 | **Duration:** ~6h
-
-### What I Did
-- Added `reminders` table to `database.py`
-- `save_reminder`, `get_pending_reminders`, `mark_done`
-- Created `src/hands/reminder.py` (background checker)
-- `set_reminder` tool
-- macOS notifications via `osascript`
-
-### Learned
-- **3 parts:** SQLite + tool + background thread
-- **ISO datetime** = `2025-09-26T14:00:00`
-- **`threading.Thread(daemon=True)`** = background task
-- **`time.sleep(30)`** = check every 30s
-- **`osascript`** = macOS notifications
-
-### Results
-- 2-minute reminder works
-- macOS notification appears
-- 4 tools total
-
----
-
-## Day 12 — App Control + PDF
-
-**Difficulty:** 🟡 | **Duration:** ~6h
-
-### What I Did
-- `open_app()` via `subprocess.run(["open", "-a", ...])`
-- `read_pdf()` via PyMuPDF
-- Short path support (`PROJECT_DIR`)
-- Tool descriptions + system prompt rules
-
-### Learned
-- **`open -a "App"`** = launch macOS app
-- **PyMuPDF** = read PDFs (`fitz` / `pymupdf`)
-- **Short path** = `"test.pdf"` → full path
-- **Tool descriptions** = must be explicit
-- **System prompt rules** = override LLM confusion
-- **`cupsfilter`** = create test PDFs
-
-### Results
-- App control works
-- PDF reading works
-- 6 tools total
-
----
-
-## Day 13 — Web Search + Email
-
-**Difficulty:** 🟡 | **Duration:** ~6h
-
-### What I Did
-- `web_search()` via `ddgs` (renamed from `duckduckgo-search`)
-- `read_email()` via IMAPClient
-- Added Gmail credentials to `.env`
-
-### Learned
-- **`ddgs`** = new package name for DuckDuckGo
-- **Free web search** = no API key
-- **Gmail IMAP** = needs app password + 2FA
-- **App password** = 16 chars, only shown once
-- **IMAPClient** = simple IMAP library
-- **ENVELOPE** = email headers
-- **`load_dotenv()`** = must be in every file using `os.getenv()`
-
-### Results
-- Web search: working
-- Email: code ready, `.env` pending
-- 8 tools total
-
----
-
-## Day 14 — Screen Vision (Eyes)
-
-**Difficulty:** 🟠 | **Duration:** ~6h
-
-### What I Did
-- Pulled `moondream` vision model via Ollama
-- Created `analyze_screen()` in `tools.py`
-- Takes screenshot with `screencapture`
-- Base64 encodes image
-- Sends to `moondream` for description
-- Added to `TOOLS` (9 tools total)
-
-### Learned
-- **Vision model** = LLM that understands images
-- **Multimodal** = text + image input
-- **`screencapture -x`** = silent screenshot on macOS
-- **Base64 encode** = image → string for LLM
-- **`images=[...]`** = Ollama vision parameter
-- **`moondream`** = small vision model (~1.7GB), 8GB RAM friendly
-- **`llava:7b`** = bigger (~4.5GB), better quality, but RAM-heavy
-
-### Code
+**Workaround:**
 ```python
-import base64
-import ollama
-
-def analyze_screen():
-    try:
-        subprocess.run(["screencapture", "-x", "/tmp/screen.png"], check=True)
-        with open("/tmp/screen.png", "rb") as f:
-            image_data = base64.b64encode(f.read()).decode()
-        response = ollama.chat(
-            model="moondream",
-            messages=[{
-                "role": "user",
-                "content": "What's on this screen? Describe it briefly.",
-                "images": [image_data]
-            }]
-        )
-        return response['message']['content']
-    except Exception as e:
-        return f"Error: {e}"
-
----
-
-## Day 15 — System Control + Alarm
-
-**Difficulty:** 🟡 | **Duration:** ~6h
-
-### What I Did
-- Added volume control (`set_volume`, `mute`, `unmute`)
-- Added brightness control (`set_brightness`)
-- Added system control (`sleep_mac`, `lock_screen`)
-- Added alarm (`set_alarm`)
-- Total tools: **16**
-
-### Learned
-- **`osascript -e`** = run AppleScript from terminal
-- **Volume:** `set volume output volume 50`
-- **Mute:** `set volume output muted true`
-- **Sleep:** `tell application "System Events" to sleep`
-- **Lock:** `CGSession -suspend` (native macOS binary)
-- **Brightness:** `brightness` CLI (needs `brew install brightness`)
-- **Alarm:** No native macOS alarm → use `threading` + `say`
-- **Time check loop:** `while True: if now == alarm_time: say(); break`
-- **`daemon=True`** = thread dies with main process
-
-### Code
-```python
-def set_volume(level):
-    subprocess.run(["osascript", "-e", f"set volume output volume {level}"], check=True)
-    return f"Volume set to {level}%"
-
-def mute():
-    subprocess.run(["osascript", "-e", "set volume output muted true"], check=True)
-    return "Muted"
-
-def set_brightness(level):
-    subprocess.run(["brightness", str(level / 100)], check=True)
-    return f"Brightness set to {level}%"
-
-def sleep_mac():
-    subprocess.run(["osascript", "-e", 'tell application "System Events" to sleep'], check=True)
-    return "Sleeping"
-
-def lock_screen():
-    subprocess.run([
-        "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
-        "-suspend"
-    ], check=True)
-    return "Screen locked"
-
-def set_alarm(alarm_time, message="Wake up!"):
-    def alarm_loop():
-        while True:
-            now = datetime.now().strftime("%H:%M")
-            if now == alarm_time:
-                subprocess.run(["say", message])
-                break
-            time.sleep(30)
-    threading.Thread(target=alarm_loop, daemon=True).start()
-    return f"Alarm set for {alarm_time}"
-
-
----
-
-## Day 15 — System Control + Alarm + Performance
-
-**Difficulty:** 🟡 | **Duration:** ~7h
-
-### What I Did
-- Added volume control (`set_volume`, `mute`, `unmute`)
-- Added brightness (`set_brightness`)
-- Added system control (`sleep_mac`, `lock_screen`)
-- Added alarm (`set_alarm`)
-- **Performance fix:** Switched from `qwen2.5:7b` to `qwen2.5:3b`
-- Set `OLLAMA_KEEP_ALIVE=30s`
-- Total tools: **16**
-
-### Learned
-- **`osascript -e`** = run AppleScript from terminal
-- **Volume:** `set volume output volume 50`
-- **Sleep:** `tell application "System Events" to sleep`
-- **Lock:** `CGSession -suspend`
-- **Brightness:** `brightness` CLI (`brew install brightness`)
-- **Alarm:** `threading` + `say`
-- **`daemon=True`** = thread dies with main process
-
-### Performance Problem
-- **8GB RAM not enough** for `qwen2.5:7b` (4.6GB)
-- Mac froze due to swap
-- **Fix 1:** `qwen2.5:3b` (~2GB) — saves ~2.6GB
-- **Fix 2:** `OLLAMA_KEEP_ALIVE=30s` — model unloads after 30s
-- **Result:** Mac no longer freezes
-
-### Problems
-- **Alarm → opened Safari** — LLM called `open_app`
-  - Fix: Stronger tool descriptions + system prompt
-- **`TOOLSfrom` syntax error** — two imports on one line
-  - Fix: Split into two lines
-- **`set_brightness` missing** from import + handler
-  - Fix: Added both
-- **`PaMacCore Error -9986`** — CoreAudio locked
-  - Fix: `sudo killall coreaudiod`
-
-### Results
-- Volume/mute/brightness: OK
-- Sleep/lock: OK
-- Alarm: OK
-- LLM picks correct tool: yes
-- Mac no longer freezes: **yes**
-- Total tools: **16**
-
-### Key Takeaways
-1. **8GB RAM is tight** — use 3b model, not 7b
-2. **`OLLAMA_KEEP_ALIVE=30s`** frees RAM
-3. **Tool descriptions must be explicit** — LLM follows literally
-4. **System prompt rules** override confusion
-5. **`sudo killall coreaudiod`** fixes audio lock
-6. **`osascript`** controls macOS natively
-7. **16 tools** — Remy is a full assistant
-
-
-
----
-
-## Day 16 — Wake Word ("Hey Jarvis")
-
-**Difficulty:** 🔴 | **Duration:** ~7h
-
-### What I Did
-- Installed `openwakeword` for wake word detection
-- Created `src/ears/wake_word.py`
-- Used TFLite backend (`ai-edge-litert`) instead of ONNX
-- Integrated wake word into `remy.py`
-- Fixed double response bug
-- Total: 16 tools + wake word
-
-### Learned
-- **Wake word** = trigger phrase to activate assistant
-- **openWakeWord** = free, open-source wake word engine
-- **TFLite vs ONNX on macOS ARM64:**
-  - ONNX → low scores (0.05-0.14), unreliable
-  - TFLite (ai-edge-litert) → high scores (0.43-0.97), works
-- **Threshold tuning:** 0.35 works well
-- **Stream lifecycle:** `stream.start()` + `stream.stop()` manually
-- **Circular import:** never import your own file
-
-### Code
-```python
-# wake_word.py
-import openwakeword
-from openwakeword.model import Model
-import sounddevice as sd
-import numpy as np
-
-_model = None
-THRESHOLD = 0.35
-
-def _load_model():
-    global _model
-    if _model is None:
-        _model = Model(
-            wakeword_models=["hey_jarvis"],
-            inference_framework="tflite"
-        )
-    return _model
-
-def wait_for_wake_word(timeout=30):
-    model = _load_model()
-    print("💤 Waiting for wake word...")
-    detected = False
-    stream = None
-
-    def callback(indata, frames, time, status):
-        nonlocal detected
-        if detected:
-            return
-        audio = (indata[:, 0] * 32767).astype(np.int16)
-        prediction = model.predict(audio)
-        for name, score in prediction.items():
-            if score > THRESHOLD:
-                print(f"🎯 Wake word detected: {name} ({score:.2f})")
-                detected = True
-
-    try:
-        stream = sd.InputStream(callback=callback, channels=1, samplerate=16000, device=0)
-        stream.start()
-        elapsed = 0
-        while not detected and elapsed < timeout * 10:
-            sd.sleep(100)
-            elapsed += 1
-    finally:
-        if stream is not None:
-            stream.stop()
-            stream.close()
-
-    return detected
-
-
-
----
-
-## Day 17 — Groq LLM Migration
-
-**Difficulty:** 🟡 | **Duration:** ~4h
-
-### What I Did
-- Migrated from local `qwen2.5:3b` (Ollama) to **Groq API**
-- Model: `openai/gpt-oss-120b` (replaced deprecated `llama-3.3-70b-versatile`)
-- Updated `remy.py` for Groq's OpenAI-compatible format
-- Fixed response handling (`response.choices[0].message`)
-- Fixed tool call format (`call.function.arguments` as JSON string)
-- Added `tool_call_id` to tool results
-
-### Learned
-- **Groq** = cloud LLM, OpenAI-compatible API
-- **Model deprecation:** `llama-3.3-70b-versatile` removed Aug 2026
-- **New models:** `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3-32b`
-- **Response format:**
-  - Ollama: `response['message']['content']`
-  - Groq: `response.choices[0].message.content`
-- **Tool calls:**
-  - Ollama: `call.function.name`, `call.function.arguments` (dict)
-  - Groq: `call.function.name`, `call.function.arguments` (JSON string), `call.id`
-- **Tool result format:** needs `tool_call_id` for Groq
-
-### Code
-```python
-# Groq client
-from groq import Groq
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-
-# Chat call
-response = groq_client.chat.completions.create(
-    model='openai/gpt-oss-120b',
-    messages=messages,
-    tools=TOOLS
+result = client.audio.transcriptions.create(
+    file=file,
+    model="whisper-large-v3-turbo",
+    language="en",
+    prompt="Remy voice assistant. Common phrases: tell me a joke, what time is it, open Spotify."
 )
+```
 
-# Tool calls
-msg = response.choices[0].message
-if msg.tool_calls:
-    for call in msg.tool_calls:
-        name = call.function.name
-        args = json.loads(call.function.arguments or "{}")
-        # execute tool
-        results.append({
-            "role": "tool",
-            "tool_call_id": call.id,
-            "content": result
-        })
+### 2. Voice Similarity Threshold Is Tight
+
+**Problem:** `SIMILARITY_THRESHOLD = 0.45` sometimes scores 0.48–0.50 → Remy rejects the user.
+
+**Fix:** Lower to `0.40`, or re-run `enroll.py` with a longer sample.
+
+### 3. TTS Cuts Itself Off
+
+**Problem:** `_listen_for_interrupt()` monitors the mic while `afplay` plays. Remy's own voice can trigger it.
+
+**Workaround:** Raise `INTERRUPT_THRESHOLD` (`0.25` → `0.40`).
+
+**Real fix:** Echo cancellation (WebRTC AEC) or mute mic during playback.
+
+### 4. Message History Grows in Long Sessions
+
+**Problem:** The `messages` list keeps growing → more tokens per turn → slower + costlier.
+
+**Current fix:**
+```python
+if len(messages) > 22:
+    messages = [messages[0]] + messages[-20:]
+```
+
+System prompt + last 20 messages kept.
+
+### 5. Piper Model Files Are Large
+
+**Problem:** `en_US-ryan-high.onnx` ~110 MB — too big for GitHub.
+
+**Fix:** Add to `.gitignore`, link to download in README.
+
+### 6. `pkg_resources` Deprecation Warning
+
+**Problem:** `webrtcvad` uses legacy `pkg_resources` → warning on Python 3.14.
+
+**Workaround:** Ignore (warning, not error).
+
+**Real fix:** Switch to `webrtcvad-wheels` or `silero-vad`.
+
+---
+
+## 🧪 Testing
+
+### Manual Test Checklist
+
+After any major change:
+
+1. **Wake word:** "Hey Jarvis" → Remy says "Yes?"
+2. **Simple question:** "What time is it?" → correct time
+3. **Tool call:** "Open Spotify" → Spotify launches
+4. **Streaming TTS:** "Tell me a long story" → first sentence in < 1s
+5. **Conversation mode:** "What time?" + "Tell me a joke" → no wake word needed
+6. **Exit:** "Bye" → conversation mode ends
+7. **Shutdown:** "Shutdown remy" → program exits
+8. **Silence timeout:** Stay quiet for 30s → auto-exit
+9. **Interrupt:** Say "Stop" while Remy talks → TTS stops
+
+### Performance Targets (M2, 8GB RAM)
+
+| Stage | Target |
+|---|---|
+| Wake word detection | < 0.5s |
+| STT | < 0.5s |
+| LLM first token | < 0.8s |
+| TTS first audio | < 0.3s |
+| **Total first audio** | **< 2s** |
+
+---
+
+## 🛠️ Dev Environment
+
+### Recommended VS Code Extensions
+
+- **Python** (Microsoft)
+- **Pylance** — type checking
+- **Black Formatter** — auto-format
+- **Ruff** — fast linter
+- **GitLens** — git history
+
+### Coding Standards
+
+- **PEP 8**
+- **Type hints** on function signatures
+- **Docstrings** on all public functions
+- **Max line length:** 100
+- **Commit prefixes:** `feat:`, `fix:`, `docs:`, `refactor:`
+
+### Branch Strategy
+
+- `main` → stable, releasable
+- `dev` → development
+- `feature/xxx` → new feature
+- `fix/xxx` → bug fix
+
+---
+
+## 📋 TODO
+
+### Short-term (v1.1)
+
+- [ ] Wire real `interrupt()` into `remy_service.py`
+- [ ] STT improvement (Whisper `prompt` param)
+- [ ] Warn + auto-run `enroll.py` if `voice_profile.npy` missing
+- [ ] User-friendly error messages
+- [ ] Pin `requirements.txt` to minimum versions
+
+### Mid-term (v1.2)
+
+- [ ] Mobile companion app (Flet Android)
+- [ ] Fully local mode (Ollama + `faster-whisper`)
+- [ ] Multi-language support (TR, EN)
+- [ ] Plugin system for custom tools
+- [ ] System tray icon (run in background)
+
+### Long-term (v2.0)
+
+- [ ] HomeKit integration
+- [ ] Google Calendar / Apple Calendar
+- [ ] WhatsApp message reading
+- [ ] Home automation (MQTT)
+- [ ] Voice cloning (Chatterbox TTS)
+- [ ] Windows and Linux support
+
+---
+
+## 🐛 Troubleshooting
+
+### `FileNotFoundError: assets/logo_base64.txt`
+
+**Cause:** Running `main.py` from the wrong directory.
+
+**Fix:**
+```python
+from pathlib import Path
+APP_DIR = Path(__file__).parent
+PROJECT_ROOT = APP_DIR.parent
+ASSETS_DIR = PROJECT_ROOT / "assets"
+
+with open(ASSETS_DIR / "logo_base64.txt", "r") as f:
+    LOGO_BASE64 = f.read().strip()
+```
+
+### `module 'flet.controls.padding' has no attribute 'symmetric'`
+
+**Cause:** Flet 0.85+ API change.
+
+**Fix:** `ft.padding.symmetric()` → `ft.Padding.symmetric()` (capital P)
+
+### `WARNING:root:Tried to import tflite runtime`
+
+**Cause:** `openWakeWord` tried tflite, fell back to onnx.
+
+**Fix:** Harmless. Or set `inference_framework="onnx"` in `wake_word.py`.
+
+### `afplay timeout`
+
+**Cause:** A single audio file exceeded 60s.
+
+**Fix:** Increase timeout in `speaker.py` or split text.
+
+---
+
+## 🎓 Lessons Learned
+
+1. **Streaming is everything.** Users won't wait 2 seconds. Streaming STT + LLM + TTS = seamless UX.
+
+2. **Prompt engineering matters.** The line `WAKE WORD: ...` confused the LLM into telling the user to say "Hey Jarvis". Simplify prompts; remove irrelevant info.
+
+3. **Error tolerance is essential.** Mic fails, Groq returns 429. Wrap every layer in `try/except`.
+
+4. **Tool calling is magic.** 16 tools, no hardcoded intent routing. Adding a new tool = 10 lines.
+
+5. **Apple design is simple.** One accent color + grays + lots of space = professional look.
+
+6. **Commit discipline.** Commit daily with meaningful messages — recruiters look at your history.
+
+7. **Docs = finishing the job.** Code is 50%. Documentation is the other 50%.
+
+---
+
+## 📚 References
+
+- [Groq API Docs](https://console.groq.com/docs)
+- [openWakeWord](https://github.com/dscripka/openWakeWord)
+- [Piper TTS](https://github.com/rhasspy/piper)
+- [Flet Docs](https://flet.dev/docs/)
+- [Resemblyzer](https://github.com/resemble-ai/Resemblyzer)
+- [Groq Function Calling](https://console.groq.com/docs/tool-use)
+- [SoundDevice](https://python-sounddevice.readthedocs.io/)
+- [PyMuPDF](https://pymupdf.readthedocs.io/)
+
+---
+
+## 📝 Changelog
+
+### v1.0.0 (Oct 2025)
+
+- First stable release
+- Wake word + VAD + STT + TTS pipeline
+- 16 tools + native tool calling
+- Streaming LLM + streaming TTS
+- Conversation mode + multi-tier exit
+- Apple-style Flet UI
+- Speaker verification
+- SQLite memory
+
+### v0.5.0 (Sep 2025)
+
+- Streaming TTS integration
+- Conversation mode
+- First Flet UI
+- 16 tools added
+
+### v0.1.0 (Aug 2025)
+
+- Project start
+- Wake word + STT + LLM core loop
+- First 5 tools
+
+---
+
+<div align="center">
+
+*This is a living document. Updated after every major change.*
+
+*Last updated: Oct 2025*
+
+</div>
+```
+
+
+
