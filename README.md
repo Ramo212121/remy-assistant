@@ -1,37 +1,33 @@
-
-
 # Remy
 
-### A fully local, privacy-first AI voice assistant for macOS
+### An always-listening AI voice assistant for macOS, with on-device wake word and speech output
 
 Natural voice interaction, real system control, and native tool calling — engineered for developers who value speed, privacy, and craft.
 
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![macOS](https://img.shields.io/badge/macOS-13+-000000?style=for-the-badge&logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Flet](https://img.shields.io/badge/Flet-UI-02569B?style=for-the-badge)](https://flet.dev/)
 [![Groq](https://img.shields.io/badge/Groq-Inference-F55036?style=for-the-badge)](https://groq.com/)
 [![License](https://img.shields.io/badge/License-MIT-34C759?style=for-the-badge)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge)](https://github.com/YOUR_USERNAME/remy/pulls)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=for-the-badge)](https://github.com/Ramo212121/remy-assistant/pulls)
 
 <br />
 
 **[Overview](#-overview)** · **[Features](#-features)** · **[Architecture](#-architecture)** · **[Quick Start](#-quick-start)** · **[Tools](#-built-in-tools)** · **[Configuration](#%EF%B8%8F-configuration)** · **[Roadmap](#-roadmap)** · **[License](#-license)**
 
-</div>
-
 ---
 
 ## 📌 Overview
 
-**Remy** is a voice-controlled AI assistant that runs natively on macOS. It listens for the wake word **"Hey Jarvis"**, understands natural language through a streaming LLM, and executes real tasks on your machine — launching applications, reading PDFs, searching the web, checking email, adjusting system settings, and more.
+**Remy** is a voice-controlled AI assistant that runs natively on macOS. It listens for the wake word **"Hey Remy"**, answers without a button press while the app is open, understands natural language through a streaming LLM, and executes real tasks on your machine — launching applications, reading PDFs, searching the web, checking email, adjusting system settings, and more.
 
 Remy was built around three engineering principles:
 
 | Principle | Implementation |
 | :--- | :--- |
-| **Privacy-first** | Voice and prompt data stay in your control. Swappable to a fully offline stack (Ollama + `faster-whisper` + Piper). |
-| **Low latency** | Streaming STT and streaming TTS pipeline. First audio token in < 1 second on M-series chips. |
-| **Extensible by design** | Every capability is a Python function with a JSON schema. Adding a new tool takes ~10 lines. |
+| **Local where it can be** | The wake word, speaker check, speech output and screen analysis run on your Mac. Your commands and replies go to Groq for transcription and the LLM. |
+| **Low latency** | Replies are spoken sentence by sentence, about 2 to 3.5 seconds after you stop talking. |
+| **Extensible by design** | Every capability is a Python function with a JSON schema, registered in one file. |
 
 ---
 
@@ -39,10 +35,10 @@ Remy was built around three engineering principles:
 
 ### 🎙️ Voice Pipeline
 
-- **Wake word detection** — `openWakeWord` ("Hey Jarvis")
+- **Wake word detection** — "Hey Remy", transcribed on-device with `faster-whisper` (`tiny.en` first, `small.en` for unclear cases; about 535 MB in total, downloaded on first run)
 - **Speaker verification** — `Resemblyzer`; only the enrolled voice is accepted
 - **Voice Activity Detection** — `webrtcvad` (aggressiveness level 3)
-- **Streaming STT** — Groq Whisper Large v3 Turbo (~216× real-time)
+- **Speech-to-text** — Groq Whisper Large v3 Turbo
 - **Streaming TTS** — Piper + `afplay`, spoken sentence-by-sentence
 - **Barge-in / interrupt** — speak while Remy talks to stop playback
 - **Conversation mode** — one wake word, then continuous dialogue
@@ -53,24 +49,27 @@ Remy was built around three engineering principles:
 - **Memory** — SQLite (`messages`, `facts`, `reminders`)
 - **Tool calling** — Parallel function calls with schema validation
 - **System prompt** — Tuned for concise, natural, TTS-safe output
-- **Multi-turn context** — Automatic session windowing
+- **Multi-turn context** — Keeps the last 12 messages, restored from SQLite on restart
 
 ### 🎨 Interface
 
 - **Flet desktop app** — Native macOS window
-- **Apple-inspired design** — SF-style typography, monochrome palette
-- **Animated microphone** — Pulse ring in idle / listening / speaking / active modes
-- **Live transcript** — iOS Messages-style chat bubbles
-- **Quick Actions** — One-tap access to 10 tools
-- **Stop control** — Manual interrupt from the UI
+- **Sci-fi HUD** — Dark grid background (`scripts/generate_hud_bg.py`), monospace type, bracketed panels
+- **Status waveform** — Animated bars with a color and motion for each state
+- **Live log** — Terminal-style transcript that fills sentence by sentence
+- **Always listening** — Voice mode starts with the app and keeps the Mac from idle sleep
+- **Typed messages** — Chat with Remy without using the mic
+- **Tools panel** — 10 tools on demand, with dialogs for the ones that need input
+- **Stop control** — Stops playback and the running reply
 
 ### ⚙️ Reliability
 
 - **Multi-tier exit** — Exit commands, shutdown commands, silence timeout
 - **Graceful degradation** — Missing voice profile falls back to accept-all
-- **Error recovery** — Retry-aware audio pipeline
-- **Session reset** — Each wake word starts a fresh context
-- **Cross-platform ready** — Designed for macOS, extensible to Linux/Windows
+- **Error recovery** — The voice loop restarts itself after a microphone error
+- **Persistent memory** — Recent turns are restored across wake words and restarts
+- **Resilient loop** — Network and API errors are spoken, not fatal
+- **Rate-limit failover** — Switches to `gpt-oss-20b` instead of waiting out a limit
 
 ---
 
@@ -85,12 +84,12 @@ flowchart TD
     User([👤 User Voice]) --> Ears
 
     subgraph Ears[🎙️ EARS]
-        WW[openWakeWord] --> VAD[webrtcvad]
-        VAD --> Whisper[Groq Whisper STT]
-        Whisper --> RS[Resemblyzer<br/>Speaker Verify]
+        WW[Local Whisper wake word] --> VAD[webrtcvad]
+        VAD --> RS[Resemblyzer<br/>Speaker Verify]
+        RS --> Whisper[Groq Whisper STT]
     end
 
-    RS --> Brain
+    Whisper --> Brain
 
     subgraph Brain[🧠 BRAIN]
         LLM[Groq LLM<br/>gpt-oss-120b]
@@ -136,7 +135,7 @@ flowchart TD
                            │
        ┌───────────────────▼───────────────────┐
        │                EARS                    │
-       │  openWakeWord → webrtcvad → Whisper    │
+       │  Hey Remy → webrtcvad → Whisper        │
        │  Resemblyzer (speaker verification)    │
        └───────────────────┬───────────────────┘
                            │  transcribed text
@@ -166,9 +165,9 @@ flowchart TD
 
 ### Data Flow
 
-1. **Wake** — `openWakeWord` fires on "Hey Jarvis"
+1. **Wake** — Local Whisper hears "Hey Remy"
 2. **Listen** — `webrtcvad` captures the utterance, `Resemblyzer` verifies the speaker
-3. **Transcribe** — Groq Whisper returns text in ~200 ms
+3. **Transcribe** — Groq Whisper returns the text
 4. **Reason** — Groq LLM streams tokens; if a tool is needed, it emits a `tool_call`
 5. **Act** — The matching Python function runs (AppleScript, subprocess, PyMuPDF, etc.)
 6. **Speak** — Piper synthesizes each completed sentence; `afplay` plays it with interrupt support
@@ -187,8 +186,15 @@ remy/
 │       └── remy_service.py           # UI ↔ backend bridge
 │
 ├── src/
+│   ├── config.py                     # Absolute paths + settings
+│   │
+│   ├── brain/                        # Shared by terminal and desktop
+│   │   ├── assistant.py              # LLM streaming + tool calling + memory
+│   │   ├── commands.py               # Exit / shutdown phrases
+│   │   └── voice_loop.py             # Wake word → conversation loop
+│   │
 │   ├── ears/                         # Input layer
-│   │   ├── wake_word.py              # openWakeWord wrapper
+│   │   ├── wake_word.py              # "Hey Remy" detection (local)
 │   │   └── listener.py               # VAD + Whisper + speaker verify
 │   │
 │   ├── mouth/                        # Output layer
@@ -202,9 +208,12 @@ remy/
 │       └── database.py               # SQLite schema + helpers
 │
 ├── assets/
-│   ├── logo.png                      # App logo (README + UI)
-│   └── logo_base64.txt               # Base64-embedded for Flet
+│   ├── hud_bg.png                    # App background
+│   └── logo.png                      # App logo
 │
+├── scripts/
+│   └── generate_hud_bg.py            # Regenerates the background
+├── tests/                            # pytest suite (no mic or network needed)
 ├── remy.py                           # Terminal entry point
 ├── enroll.py                         # Voice enrollment CLI
 ├── requirements.txt
@@ -223,8 +232,7 @@ remy/
 | Requirement | Version | Notes |
 | :--- | :--- | :--- |
 | **macOS** | 13 (Ventura) or later | Apple Silicon recommended |
-| **Python** | 3.11+ | 3.12 works; 3.14 tested |
-| **Homebrew** | Latest | For `piper` and system deps |
+| **Python** | 3.14 | Versions in `requirements.txt` are pinned and tested on 3.14 |
 | **Groq API key** | — | Free tier: [console.groq.com](https://console.groq.com) |
 | **Piper model** | `en_US-ryan-high.onnx` | [Download here](https://huggingface.co/rhasspy/piper-voices) |
 
@@ -232,23 +240,20 @@ remy/
 
 ```bash
 # 1. Clone
-git clone https://github.com/YOUR_USERNAME/remy.git
-cd remy
+git clone https://github.com/Ramo212121/remy-assistant.git
+cd remy-assistant
 
 # 2. Virtual environment
-python3.11 -m venv venv
+python3.14 -m venv venv
 source venv/bin/activate
 
-# 3. System dependencies
-brew install piper
-
-# 4. Python dependencies
+# 3. Python dependencies (includes the piper command)
 pip install -r requirements.txt
 
-# 5. Piper voice model
+# 4. Piper voice model
 #    Place en_US-ryan-high.onnx and en_US-ryan-high.onnx.json in the project root
 
-# 6. Environment variables
+# 5. Environment variables
 cp .env.example .env
 # Edit .env and add your GROQ_API_KEY (and GMAIL_* for email tool)
 ```
@@ -272,8 +277,13 @@ python remy.py
 **Desktop interface:**
 
 ```bash
-cd app
-python main.py
+python app/main.py
+```
+
+**Tests:**
+
+```bash
+python -m pytest tests
 ```
 
 ---
@@ -284,12 +294,14 @@ python main.py
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│  1.  "Hey Jarvis"           →  Remy wakes:  "Yes?"           │
+│  1.  "Hey Remy"             →  Remy wakes:  "Yes?"           │
 │  2.  "What time is it?"     →  "It's 4:32 PM."               │
 │  3.  "Open Spotify"         →  Launches Spotify              │
 │  4.  "Bye"                  →  "Goodbye!" (wake-word mode)   │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+Keep the app open and the lid up. Voice mode starts with the app, and it stops the Mac from idle sleep while it listens. Use the `VOICE: ON` button to turn the microphone off. For better range, raise the input level in System Settings → Sound → Input.
 
 ### Conversation Mode
 
@@ -297,7 +309,7 @@ Once woken, Remy stays in **conversation mode** until one of:
 
 | Trigger | Behavior |
 | :--- | :--- |
-| `"bye"`, `"goodbye"`, `"see you"`, `"that's all"`, `"i'm done"` | Exit conversation mode, return to wake-word standby |
+| `"bye"`, `"goodbye"`, `"see you"`, `"that's all"`, `"i'm done"` | Exit conversation mode, return to wake-word standby. The whole sentence must be the command |
 | `"shutdown remy"`, `"quit"`, `"exit"` | Fully terminate the program |
 | **30 seconds of silence** | Auto-exit conversation mode |
 
@@ -365,9 +377,8 @@ TOOLS.append({
     }
 })
 
-# 3. Register it in handle_tool_calls() in remy.py and remy_service.py
-elif name == 'my_tool':
-    result = my_tool(args.get('param', ''))
+# 3. Register it in TOOL_FUNCTIONS in src/hands/tools.py
+TOOL_FUNCTIONS["my_tool"] = my_tool
 ```
 
 That's it — the LLM will route to it automatically.
@@ -393,18 +404,11 @@ GMAIL_APP_PASSWORD=xxxx_xxxx_xxxx_xxxx
 
 ### System Prompt
 
-Edit `SYSTEM_PROMPT` in `remy.py` or `app/services/remy_service.py` to customize Remy's tone, tool-routing rules, and constraints.
+Edit `SYSTEM_PROMPT` in `src/brain/assistant.py` to customize Remy's tone, tool-routing rules, and constraints.
 
 ### Wake Word
 
-Edit `src/ears/wake_word.py`:
-
-```python
-_model = Model(
-    wakeword_models=["hey_jarvis"],   # alexa, hey_mycroft, etc.
-    inference_framework="onnx",
-)
-```
+Edit `WAKE_PATTERN` in `src/ears/wake_word.py`. It is a regular expression over the locally transcribed text, so any phrase works.
 
 ### Speaker Verification
 
@@ -434,11 +438,11 @@ Every cloud component has a local drop-in replacement:
 | Layer | Technology | Role |
 | :--- | :--- | :--- |
 | **UI** | [Flet](https://flet.dev/) | Cross-platform Python UI |
-| **Wake Word** | [openWakeWord](https://github.com/dscripka/openWakeWord) | On-device wake word detection |
+| **Wake Word** | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | On-device wake phrase detection |
 | **VAD** | [webrtcvad](https://github.com/wiseman/py-webrtcvad) | Voice activity detection |
 | **STT** | Groq Whisper Large v3 Turbo | Speech-to-text (~216× real-time) |
 | **Speaker ID** | [Resemblyzer](https://github.com/resemble-ai/Resemblyzer) | Voice embedding + cosine similarity |
-| **LLM** | Groq `openai/gpt-oss-120b` | Reasoning + tool calling |
+| **LLM** | Groq `openai/gpt-oss-120b`, with `gpt-oss-20b` as fallback | Reasoning + tool calling |
 | **TTS** | [Piper](https://github.com/rhasspy/piper) | Offline neural text-to-speech |
 | **Audio I/O** | `sounddevice`, `soundfile` | Real-time mic + playback |
 | **Persistence** | SQLite | Messages, facts, reminders |
@@ -455,7 +459,8 @@ Every cloud component has a local drop-in replacement:
 - [x] 16 built-in tools with native function calling
 - [x] Streaming LLM + streaming TTS
 - [x] Conversation mode with multi-tier exit
-- [x] Apple-inspired Flet desktop UI
+- [x] Sci-fi HUD Flet desktop UI
+- [x] Always-on "Hey Remy" with on-device detection
 - [x] Speaker verification
 - [x] **v1.0 release**
 - [ ] Mobile companion app (Flet Android / iOS)
@@ -469,7 +474,7 @@ Every cloud component has a local drop-in replacement:
 
 ## 🤝 Contributing
 
-Contributions are welcome and appreciated. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
+Contributions are welcome and appreciated.
 
 **Quick guide:**
 
@@ -487,7 +492,7 @@ git push origin feature/your-feature
 - Follow **PEP 8**
 - Document all public functions with docstrings
 - Keep PRs focused — one feature per PR
-- Add tests for new tools when possible
+- Add tests for new tools when possible (`python -m pytest tests`)
 
 ---
 
@@ -504,7 +509,7 @@ You are free to use, modify, and distribute this software — including for comm
 Standing on the shoulders of excellent open-source work:
 
 - **[Groq](https://groq.com/)** — Blazing-fast LLM and Whisper inference
-- **[openWakeWord](https://github.com/dscripka/openWakeWord)** — On-device wake word detection
+- **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** — On-device wake phrase detection
 - **[Piper](https://github.com/rhasspy/piper)** — Offline neural TTS
 - **[Resemblyzer](https://github.com/resemble-ai/Resemblyzer)** — Speaker verification
 - **[Flet](https://flet.dev/)** — Beautiful cross-platform UI in pure Python
@@ -516,7 +521,7 @@ Standing on the shoulders of excellent open-source work:
 
 ### Remy
 
-*A voice assistant that respects your privacy and your machine.*
+*A voice assistant that lives on your desk.*
 
 **⭐ If you find this project useful, consider giving it a star.**
 
