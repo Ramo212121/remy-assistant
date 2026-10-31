@@ -1,6 +1,4 @@
-<div align="center">
 
-<img src="assets/logo.png" alt="Remy" width="140" height="140" />
 
 # Remy
 
