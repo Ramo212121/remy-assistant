@@ -1,7 +1,13 @@
+import ast
+import email.header
+import math
+import operator
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import subprocess
+import tempfile
 import pymupdf as fitz
+from src.config import PROJECT_ROOT
 from src.memory.database import save_reminder
 from ddgs import DDGS
 from imapclient import IMAPClient
@@ -11,7 +17,7 @@ import time
 import ollama
 
 
-PROJECT_DIR = os.path.expanduser("~/Desktop/MyProjects/remy")
+PROJECT_DIR = str(PROJECT_ROOT)
 
 
 # ─────────────────────────────────────────
@@ -30,11 +36,51 @@ def get_date():
     return now.strftime("%A, %B %d, %Y")
 
 
+_BINARY_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+}
+_UNARY_OPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+_FUNCTIONS = {
+    "sqrt": math.sqrt, "abs": abs, "round": round,
+    "sin": math.sin, "cos": math.cos, "tan": math.tan,
+    "log": math.log, "log10": math.log10, "exp": math.exp,
+}
+_CONSTANTS = {"pi": math.pi, "e": math.e}
+MAX_POWER = 1000
+
+
+def _evaluate(node):
+    """Only numbers, arithmetic and whitelisted math functions. Anything else is rejected."""
+    if isinstance(node, ast.Expression):
+        return _evaluate(node.body)
+    if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in _CONSTANTS:
+        return _CONSTANTS[node.id]
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPS:
+        left, right = _evaluate(node.left), _evaluate(node.right)
+        # 9**9**9 gibi ifadeler işlemciyi kilitlemesin
+        if isinstance(node.op, ast.Pow) and (abs(right) > MAX_POWER or abs(left) > 10 ** 6):
+            raise ValueError("number too large")
+        return _BINARY_OPS[type(node.op)](left, right)
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY_OPS:
+        return _UNARY_OPS[type(node.op)](_evaluate(node.operand))
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in _FUNCTIONS and not node.keywords):
+        return _FUNCTIONS[node.func.id](*[_evaluate(arg) for arg in node.args])
+    raise ValueError("only arithmetic is allowed")
+
+
 def calculate(expression):
     """Calculate a math expression."""
     try:
-        result = eval(expression)
-        return str(result)
+        return str(_evaluate(ast.parse(str(expression), mode="eval")))
     except Exception as e:
         return f"Error: {e}"
 
@@ -45,6 +91,10 @@ def calculate(expression):
 
 def set_reminder(remind_at, content):
     """Set a reminder."""
+    try:
+        datetime.fromisoformat(remind_at)
+    except (TypeError, ValueError):
+        return f"Error: '{remind_at}' is not an ISO datetime like 2026-09-26T14:00:00"
     save_reminder(remind_at, content)
     return f"Reminder set for {remind_at}: {content}"
 
@@ -67,9 +117,10 @@ def open_app(app_name):
 # ─────────────────────────────────────────
 
 def read_pdf(file_path):
-    """Read text from a PDF file."""
-    if not file_path.startswith("/"):
-        file_path = os.path.join(PROJECT_DIR, file_path)
+    """Read text from a PDF file in the project folder."""
+    file_path = os.path.realpath(os.path.join(PROJECT_DIR, file_path))
+    if os.path.commonpath([file_path, os.path.realpath(PROJECT_DIR)]) != os.path.realpath(PROJECT_DIR):
+        return "Error: the PDF must be in the Remy project folder"
 
     try:
         doc = fitz.open(file_path)
@@ -108,6 +159,13 @@ def web_search(query):
 # Email
 # ─────────────────────────────────────────
 
+def _decode_subject(raw):
+    """IMAP returns encoded words (=?UTF-8?...), so Turkish subjects need decoding."""
+    if not raw:
+        return "(no subject)"
+    return str(email.header.make_header(email.header.decode_header(raw.decode(errors="replace"))))
+
+
 def read_email(count=5):
     """Read latest unread emails from Gmail."""
     user = os.getenv("GMAIL_USER")
@@ -122,12 +180,12 @@ def read_email(count=5):
             client.select_folder("INBOX")
 
             messages = client.search(["UNSEEN"])
-            messages = messages[-count:]
+            messages = messages[-max(1, min(int(count), 20)):]
 
             output = f"Latest {len(messages)} unread emails:\n\n"
             for uid, data in client.fetch(messages, ["ENVELOPE"]).items():
                 env = data[b"ENVELOPE"]
-                subject = env.subject.decode() if env.subject else "(no subject)"
+                subject = _decode_subject(env.subject)
                 from_addr = env.from_[0].mailbox.decode() + "@" + env.from_[0].host.decode()
                 output += f"From: {from_addr}\nSubject: {subject}\n\n"
 
@@ -143,10 +201,12 @@ def read_email(count=5):
 def analyze_screen():
     """Take a screenshot and analyze it with vision model."""
     try:
-        subprocess.run(["screencapture", "-x", "/tmp/screen.png"], check=True)
-
-        with open("/tmp/screen.png", "rb") as f:
-            image_data = base64.b64encode(f.read()).decode()
+        # Sabit /tmp yolu başka kullanıcılar tarafından okunabilir
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "screen.png")
+            subprocess.run(["screencapture", "-x", path], check=True)
+            with open(path, "rb") as f:
+                image_data = base64.b64encode(f.read()).decode()
 
         response = ollama.chat(
             model="moondream",
@@ -166,9 +226,15 @@ def analyze_screen():
 # Volume
 # ─────────────────────────────────────────
 
+def _percent(level):
+    """Clamp a model-supplied level to an int between 0 and 100."""
+    return max(0, min(100, int(float(level))))
+
+
 def set_volume(level):
     """Set system volume (0-100)."""
     try:
+        level = _percent(level)
         subprocess.run(
             ["osascript", "-e", f"set volume output volume {level}"],
             check=True
@@ -209,6 +275,7 @@ def unmute():
 def set_brightness(level):
     """Set screen brightness (0-100)."""
     try:
+        level = _percent(level)
         brightness = level / 100
         subprocess.run(["brightness", str(brightness)], check=True)
         return f"Brightness set to {level}%"
@@ -235,11 +302,17 @@ def sleep_mac():
 def lock_screen():
     """Lock the screen."""
     try:
+        # CGSession yeni macOS'ta yok; bu, sistemin Ctrl+Cmd+Q kısayolu
+        # (uygulamanın Erişilebilirlik izni olmalı)
         subprocess.run([
-            "/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession",
-            "-suspend"
-        ], check=True)
+            "osascript", "-e",
+            'tell application "System Events" to keystroke "q" using {control down, command down}'
+        ], check=True, capture_output=True)
         return "Screen locked"
+    except subprocess.CalledProcessError:
+        # İzin yoksa ekranı kapat; parola ayarı açıksa bu da kilitler
+        subprocess.run(["pmset", "displaysleepnow"], check=True)
+        return "Display turned off. Grant Accessibility permission for a guaranteed lock."
     except Exception as e:
         return f"Error: {e}"
 
@@ -249,21 +322,33 @@ def lock_screen():
 # ─────────────────────────────────────────
 
 def set_alarm(alarm_time, message="Wake up!"):
-    """Set an alarm at HH:MM."""
+    """Set an alarm at the next occurrence of HH:MM."""
+    target = next_alarm_time(alarm_time)
+    if target is None:
+        return f"Error: '{alarm_time}' is not a time in HH:MM format"
+
     def alarm_loop():
-        while True:
-            now = datetime.now().strftime("%H:%M")
-            if now == alarm_time:
-                subprocess.run(["say", message])
-                break
-            time.sleep(30)
+        while datetime.now() < target:
+            time.sleep(5)
+        subprocess.run(["say", message])
 
     threading.Thread(target=alarm_loop, daemon=True).start()
-    return f"Alarm set for {alarm_time}"
+    return f"Alarm set for {target.strftime('%A %H:%M')}"
+
+
+def next_alarm_time(alarm_time, now=None):
+    """Next datetime matching HH:MM, or None if the format is wrong."""
+    now = now or datetime.now()
+    try:
+        parsed = datetime.strptime(str(alarm_time).strip(), "%H:%M")
+    except ValueError:
+        return None
+    target = now.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
+    return target if target > now else target + timedelta(days=1)
 
 
 # ─────────────────────────────────────────
-# TOOLS (JSON schema for Ollama)
+# TOOLS (JSON schema for Groq)
 # ─────────────────────────────────────────
 
 TOOLS = [
@@ -310,7 +395,7 @@ TOOLS = [
                 "properties": {
                     "remind_at": {
                         "type": "string",
-                        "description": "ISO datetime, e.g. '2025-09-26T14:00:00'"
+                        "description": "ISO datetime in local time, e.g. '2026-09-26T14:00:00'"
                     },
                     "content": {
                         "type": "string",
@@ -466,7 +551,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_alarm",
-            "description": "Use this when the user says 'set alarm', 'wake me up at', 'alarm for', or 'remind me at'. This sets a spoken alarm. Do NOT open any app.",
+            "description": "Use this when the user says 'set alarm', 'wake me up at', or 'alarm for'. This sets a spoken alarm within the next 24 hours. Do NOT use it for 'remind me'. Do NOT open any app.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -484,3 +569,34 @@ TOOLS = [
         }
     }
 ]
+
+
+TOOL_FUNCTIONS = {
+    "get_time": get_time,
+    "get_date": get_date,
+    "calculate": calculate,
+    "set_reminder": set_reminder,
+    "open_app": open_app,
+    "read_pdf": read_pdf,
+    "web_search": web_search,
+    "read_email": read_email,
+    "analyze_screen": analyze_screen,
+    "set_volume": set_volume,
+    "mute": mute,
+    "unmute": unmute,
+    "set_brightness": set_brightness,
+    "sleep_mac": sleep_mac,
+    "lock_screen": lock_screen,
+    "set_alarm": set_alarm,
+}
+
+
+def run_tool(name, args=None):
+    """Run a tool by name. Failures come back as text the model can explain to the user."""
+    function = TOOL_FUNCTIONS.get(name)
+    if function is None:
+        return f"Error: unknown tool {name}"
+    try:
+        return str(function(**(args or {})))
+    except Exception as e:
+        return f"Error: {e}"

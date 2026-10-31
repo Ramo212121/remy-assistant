@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
 
-DB_PATH = "remy.db"
+from src.config import DB_PATH
 
 
 def init_db():
@@ -47,7 +47,9 @@ def get_messages(limit=10):
 def save_fact(key, value):
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
-    cur.execute("INSERT OR REPLACE INTO facts (key, value) VALUES (?, ?)", (key, value))
+    # key sütunu UNIQUE değil, OR REPLACE tek başına eski değeri silmez
+    cur.execute("DELETE FROM facts WHERE key = ?", (key,))
+    cur.execute("INSERT INTO facts (key, value) VALUES (?, ?)", (key, value))
     con.commit()
     con.close()
 

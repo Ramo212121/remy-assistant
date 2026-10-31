@@ -1,22 +1,17 @@
-import os
-import time
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+import time
 import webrtcvad
-from pathlib import Path
-from groq import Groq
-from dotenv import load_dotenv
 from resemblyzer import VoiceEncoder, preprocess_wav
 
-# --- Config ---
-load_dotenv()
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+from src.config import (
+    SILENCE_TIMEOUT, STT_MODEL, TEMP_AUDIO, VOICE_PROFILE, get_groq_client,
+)
 
-DURATION = 5
+# --- Config ---
 SAMPLE_RATE = 16000
 CHANNELS = 1
-VOICE_PROFILE = "voice_profile.npy"
 SIMILARITY_THRESHOLD = 0.45
 
 # --- Globals ---
@@ -39,6 +34,15 @@ def _get_stream():
     return _stream
 
 
+def close_stream():
+    """Release the microphone."""
+    global _stream
+    if _stream is not None:
+        _stream.stop()
+        _stream.close()
+        _stream = None
+
+
 def set_speaking(value):
     """Set speaking flag to ignore microphone while Remy talks."""
     global is_speaking
@@ -46,104 +50,95 @@ def set_speaking(value):
 
 
 def clear_buffer():
-    """Clear the microphone buffer to remove stale audio."""
-    global _stream
+    """Drop audio that is already buffered, without waiting for new audio."""
     if _stream is not None:
         try:
-            _stream.read(16000)
-        except:
+            available = _stream.read_available
+            if available:
+                _stream.read(available)
+        except sd.PortAudioError:
             pass
 
 
-def record_audio(filename="temp.flac", duration=DURATION):
-    print(f"🎤 Recording... ({duration}s)")
-    stream = _get_stream()
-    frames = int(duration * SAMPLE_RATE)
-    recording, overflowed = stream.read(frames)
-    if overflowed:
-        print("⚠️ Overflow")
-    sf.write(filename, recording, SAMPLE_RATE)
-    print("✅ Recording finished")
-    return filename
-
-
 # --- VAD (Voice Activity Detection) ---
-def listen_vad(language="en", max_duration=15, silence_duration=1.0, min_speech_frames=3):
-    """    Record until silence detected (VAD) with strict noise filtering.
-    
-    Args:
-        max_duration: maximum recording time
-        silence_duration: silence after speech to stop
-        min_speech_frames: minimum speech frames required (filters noise)
+def listen(timeout=SILENCE_TIMEOUT, max_duration=15, silence_duration=0.7,
+           min_speech_frames=3, should_stop=lambda: False, language="en"):
+    """Record one utterance and transcribe it.
+
+    Returns the text, "" if nothing usable was heard, or None if no speech
+    started within `timeout` seconds.
     """
-    global is_speaking
-    
     if is_speaking:
-        print("🤐 Remy konuşuyor, mikrofon kapalı")
         time.sleep(0.5)
         return ""
-    
-    vad = webrtcvad.Vad(3)  # En agresif
-    sample_rate = SAMPLE_RATE
+
+    vad = webrtcvad.Vad(2)  # 3, odanın öbür ucundaki sesi kaçırıyor
     frame_duration_ms = 30
-    frame_size = int(sample_rate * frame_duration_ms / 1000)
+    frame_size = int(SAMPLE_RATE * frame_duration_ms / 1000)
 
     stream = _get_stream()
-    
-    # Buffer temizle
     clear_buffer()
-    
+
     print("🎤 Listening... (speak now)")
 
     recording = []
     silent_frames = 0
     speech_frames = 0
+    waited_frames = 0
     max_silent_frames = int(silence_duration * 1000 / frame_duration_ms)
+    max_wait_frames = int(timeout * 1000 / frame_duration_ms)
     max_frames = int(max_duration * 1000 / frame_duration_ms)
-    speech_started = False
 
-    for _ in range(max_frames):
+    while True:
+        # Yazılı mesaja cevap verilirken veya GUI'den kapatılınca bırak
+        if is_speaking or should_stop():
+            return ""
+
         frame, overflowed = stream.read(frame_size)
         audio_bytes = (frame[:, 0] * 32767).astype(np.int16).tobytes()
 
-        is_speech = vad.is_speech(audio_bytes, sample_rate)
-
-        if is_speech:
-            speech_started = True
+        if vad.is_speech(audio_bytes, SAMPLE_RATE):
             speech_frames += 1
             silent_frames = 0
         else:
             silent_frames += 1
 
-        if speech_started:
+        if speech_frames:
             recording.append(frame)
-
-        if speech_started and silent_frames > max_silent_frames:
-            print("✅ Speech ended")
-            break
+            if silent_frames > max_silent_frames or len(recording) >= max_frames:
+                print("✅ Speech ended")
+                break
+        else:
+            waited_frames += 1
+            if waited_frames > max_wait_frames:
+                print(f"⏰ Silence timeout ({timeout}s)")
+                return None
 
     # Minimum konuşma kontrolü
     if speech_frames < min_speech_frames:
         print(f"❌ Too short ({speech_frames} frames) — ignoring")
         return ""
 
-    if not recording:
-        print("❌ No speech detected")
+    sf.write(TEMP_AUDIO, np.concatenate(recording, axis=0), SAMPLE_RATE)
+
+    try:
+        if not is_my_voice(TEMP_AUDIO):
+            print("🤐 Not my voice, ignoring...")
+            return ""
+        return transcribe(TEMP_AUDIO, language=language)
+    except Exception as e:
+        # Ağ hatası konuşma döngüsünü düşürmesin
+        print(f"⚠️ Transcription error: {e}")
         return ""
 
-    audio = np.concatenate(recording, axis=0)
-    filename = "temp.flac"
-    sf.write(filename, audio, sample_rate)
-
-    # Speaker verification
-    if not is_my_voice(filename):
-        print("🤐 Not my voice, ignoring...")
-        return ""
-
-    text = transcribe(filename)
-    return text
 
 # --- Speaker Verification ---
+def preload():
+    """Load the voice check now so the first command doesn't pay for it."""
+    _load_encoder()
+    _load_profile()
+
+
 def _load_encoder():
     global _encoder
     if _encoder is None:
@@ -154,10 +149,10 @@ def _load_encoder():
 def _load_profile():
     global _my_embedding
     if _my_embedding is None:
-        if Path(VOICE_PROFILE).exists():
+        if VOICE_PROFILE.exists():
             _my_embedding = np.load(VOICE_PROFILE)
         else:
-            print("⚠️ voice_profile.npy not found! Run enroll.py first.")
+            print(f"⚠️ {VOICE_PROFILE} not found! Run enroll.py first. Accepting every voice.")
     return _my_embedding
 
 
@@ -168,7 +163,7 @@ def is_my_voice(audio_file):
         return True  # No profile → accept everything
 
     encoder = _load_encoder()
-    wav = preprocess_wav(Path(audio_file))
+    wav = preprocess_wav(audio_file)
     new_emb = encoder.embed_utterance(wav)
 
     # Cosine similarity
@@ -184,34 +179,13 @@ def is_my_voice(audio_file):
 def transcribe(filename, language="en"):
     print("📤 Sending to Groq...")
     with open(filename, "rb") as file:
-        result = client.audio.transcriptions.create(
+        result = get_groq_client().audio.transcriptions.create(
             file=file,
-            model="whisper-large-v3-turbo",
+            model=STT_MODEL,
             language=language,
             response_format="text"
         )
     return result
-
-
-def listen(duration=DURATION, language="en", use_vad=True):
-    """Listen with VAD — stops when silence detected."""
-    global is_speaking
-    if is_speaking:
-        time.sleep(0.5)
-        return ""
-
-    if use_vad:
-        return listen_vad(language=language)
-
-    filename = record_audio(duration=duration)
-
-    # Speaker verification
-    if not is_my_voice(filename):
-        print("🤐 Not my voice, ignoring...")
-        return ""
-
-    text = transcribe(filename)
-    return text
 
 
 if __name__ == "__main__":
