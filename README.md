@@ -214,6 +214,7 @@ remy/
 ├── scripts/
 │   └── generate_hud_bg.py            # Regenerates the background
 ├── tests/                            # pytest suite (no mic or network needed)
+├── mobile/                           # Android app (see mobile/README.md)
 ├── remy.py                           # Terminal entry point
 ├── enroll.py                         # Voice enrollment CLI
 ├── requirements.txt
@@ -463,7 +464,7 @@ Every cloud component has a local drop-in replacement:
 - [x] Always-on "Hey Remy" with on-device detection
 - [x] Speaker verification
 - [x] **v1.0 release**
-- [ ] Mobile companion app (Flet Android / iOS)
+- [x] Android app (`mobile/`): push-to-talk, Groq directly, HUD design
 - [ ] Fully offline mode (Ollama + `faster-whisper` + Piper)
 - [ ] Plugin system for user-defined tools
 - [ ] Multi-language support (Turkish, English)

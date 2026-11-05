@@ -1,0 +1,35 @@
+[project]
+name = "remy"
+version = "1.0.0"
+description = "Remy voice assistant for Android"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Ramazan Karahan" }]
+dependencies = [
+    "flet==1.0.5",
+    "flet-audio==1.0.5",
+    "flet-audio-recorder==1.0.5",
+    "flet-permission-handler==1.0.5",
+]
+
+[dependency-groups]
+dev = ["flet[all]==1.0.5", "pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.flet]
+org = "io.github.ramo212121"
+product = "Remy"
+company = "Ramazan Karahan"
+copyright = "Copyright (C) 2026 Ramazan Karahan"
+icon_background = "#03070B"
+permissions = ["microphone"]
+
+[tool.flet.app]
+path = "src"
+
+[tool.flet.android.permission]
+"android.permission.INTERNET" = true
+"android.permission.RECORD_AUDIO" = true
