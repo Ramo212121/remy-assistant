@@ -281,10 +281,14 @@ def main(page: ft.Page):
         padding=ft.Padding.symmetric(vertical=10),
     )
 
-    def make_entry(role, text, when=None):
+    def make_entry(role, text, when=None, image=None):
         tag, tag_color, text_color = LOG_STYLES[role]
-        label = ft.Text(text, size=14, color=text_color, selectable=True, expand=True,
+        label = ft.Text(text, size=14, color=text_color, selectable=True,
                         style=ft.TextStyle(height=1.4))
+        body = [label]
+        if image:
+            # Remy'nin "what is it?" cevabını verirken baktığı fotoğraf
+            body.append(ft.Image(src=image, height=130, fit=ft.BoxFit.CONTAIN, border_radius=2))
         entry = ft.Container(
             content=ft.Row(
                 [
@@ -296,7 +300,7 @@ def main(page: ft.Page):
                         spacing=1,
                         tight=True,
                     ),
-                    label,
+                    ft.Column(body, spacing=6, expand=True, tight=True),
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.START,
@@ -308,10 +312,10 @@ def main(page: ft.Page):
         entry.data = label
         return entry
 
-    def append_entry(role, text, when=None):
+    def append_entry(role, text, when=None, image=None):
         if empty_state in log.controls:
             log.controls.remove(empty_state)
-        entry = make_entry(role, text, when)
+        entry = make_entry(role, text, when, image)
         log.controls.append(entry)
         del log.controls[:-MAX_ENTRIES]
         return entry
@@ -415,6 +419,12 @@ def main(page: ft.Page):
         refresh()
 
     service = RemyService(on_state=on_state, on_message=on_message, on_sentence=on_sentence)
+
+    def on_snapshot(jpeg):
+        append_entry("tool", "What Remy saw:", image=jpeg)
+        refresh_and_scroll()
+
+    service.on_snapshot = on_snapshot
 
     def toggle_voice(e):
         if service.voice_active:

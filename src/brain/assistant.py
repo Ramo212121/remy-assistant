@@ -32,6 +32,8 @@ TOOL ROUTING — follow exactly:
 - "search for X" / "look up X" → web_search.
 - "read my email" → read_email.
 - "what's on my screen" → analyze_screen.
+- "what is it" / "what is this" / "what am I holding" / "what do you see" → look_at_camera (takes one photo with the camera).
+  Call it again for every such question: the user may be holding something new, and earlier photos are out of date.
 - "volume X" / "set volume" → set_volume (ONLY if user says "volume").
 - "mute" → mute. "unmute" → unmute.
 - "brightness X" → set_brightness.
@@ -46,6 +48,24 @@ ERROR_REPLY = "I couldn't reach the server. Please try again."
 FIRST_CHUNK_CHARS = 60  # uzun cümleler virgülden bölünür, ilk ses erken çıksın
 
 _SENTENCE_END = re.compile(r"(?<=[.!?…])\s+")
+
+# Bu sorularda kamera aracı kodla zorunlu: model aksi halde eski fotoğrafın cevabını tekrarlıyor
+_CAMERA_QUESTION = re.compile(
+    r"\bwhat (am i|i'?m) (holding|showing|wearing)\b"
+    r"|\bwhat do you see\b|\bcan you see (this|that|it|me)\b|\blook at (this|that|me)\b"
+    r"|\bread (this|that)\b"
+    r"|\bwhat(?:'s| is) (this|that|it)\s*[?.!]*\s*$",
+    re.IGNORECASE,
+)
+FORCE_CAMERA = {"type": "function", "function": {"name": "look_at_camera"}}
+
+
+def tool_choice_for(user_text, round_number, final_round):
+    if final_round:
+        return "none"
+    if round_number == 0 and _CAMERA_QUESTION.search(user_text):
+        return FORCE_CAMERA
+    return "auto"
 
 
 class Assistant:
@@ -66,7 +86,8 @@ class Assistant:
         try:
             for round_number in range(MAX_TOOL_ROUNDS):
                 final_round = round_number == MAX_TOOL_ROUNDS - 1
-                content, tool_calls = self._stream_round(on_sentence, should_stop, final_round)
+                choice = tool_choice_for(user_text, round_number, final_round)
+                content, tool_calls = self._stream_round(on_sentence, should_stop, choice)
                 reply = f"{reply} {content}".strip()
 
                 if not tool_calls or should_stop():
@@ -96,8 +117,8 @@ class Assistant:
         save_message("assistant", reply)
         return reply
 
-    def _stream_round(self, on_sentence, should_stop, final_round):
-        stream = self._open_stream(final_round)
+    def _stream_round(self, on_sentence, should_stop, tool_choice):
+        stream = self._open_stream(tool_choice)
 
         buffer = ""
         content = ""
@@ -142,7 +163,7 @@ class Assistant:
         ]
         return content, tool_calls
 
-    def _open_stream(self, final_round):
+    def _open_stream(self, tool_choice):
         """Never sit out a rate limit: SDK retries freeze the reply for seconds, so switch model instead."""
         client = self._client or get_groq_client().with_options(max_retries=0)
         messages = [self._system_message()] + self.messages
@@ -152,7 +173,7 @@ class Assistant:
                     model=model,
                     messages=messages,
                     tools=TOOLS,
-                    tool_choice="none" if final_round else "auto",
+                    tool_choice=tool_choice,
                     stream=True,
                 )
             except (groq.RateLimitError, groq.InternalServerError, groq.APIConnectionError) as e:

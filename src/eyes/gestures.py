@@ -1,4 +1,5 @@
 """Hand gestures from the Mac's camera. Frames are processed on this machine; none are stored or sent."""
+import collections
 import math
 import threading
 import time
@@ -14,6 +15,11 @@ FRAME_SECONDS = 1 / 15       # model kare başına ~14 ms; 15 fps yeterli ve iş
 PREVIEW_SECONDS = 0.25       # arayüze saniyede 4 küçük önizleme
 PROCESS_WIDTH = 320
 MAX_READ_FAILURES = 50
+SNAPSHOT_SECONDS = 0.5      # "what is it?" için son kare bu sıklıkla saklanır
+SNAPSHOT_WIDTH = 640
+SNAPSHOT_MAX_AGE = 2.0
+SNAPSHOT_HISTORY = 12        # 12 × 0,5 sn = son 6 saniye
+QUESTION_LEAD_SECONDS = 1.5  # cümle metne çevrilene kadar geçen süre; kare sorunun ortasından seçilir
 CAMERA_HELP = "Allow camera access for the app you started Remy from: System Settings → Privacy & Security → Camera."
 
 # MediaPipe hareket adı → Remy komutu
@@ -108,6 +114,66 @@ class GestureFilter:
         return min(1.0, (now - self._since) / needed)
 
 
+# Kamera açıkken son kareler burada durur; sadece bellekte, diske yazılmaz
+_snapshots = collections.deque(maxlen=SNAPSHOT_HISTORY)  # (monotonic time, jpeg)
+_snapshot_lock = threading.Lock()
+_question = {"time": None}
+
+
+def _encode_snapshot(cv2, frame):
+    height, width = frame.shape[:2]
+    if width > SNAPSHOT_WIDTH:
+        frame = cv2.resize(frame, (SNAPSHOT_WIDTH, int(height * SNAPSHOT_WIDTH / width)))
+    ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    return jpeg.tobytes() if ok else None
+
+
+def latest_frame(max_age=SNAPSHOT_MAX_AGE, at=None):
+    """A frame from a running GestureWatcher: the one nearest `at` (a time.monotonic() value),
+    or the newest. None if CAM is off or nothing is close enough."""
+    with _snapshot_lock:
+        frames = list(_snapshots)
+    if not frames:
+        return None
+    if at is not None:
+        taken, jpeg = min(frames, key=lambda frame: abs(frame[0] - at))
+        return jpeg if abs(taken - at) <= max_age else None
+    taken, jpeg = frames[-1]
+    return jpeg if time.monotonic() - taken <= max_age else None
+
+
+def mark_question():
+    """Call right after a spoken question is transcribed, so the photo shows what was held up while asking."""
+    _question["time"] = time.monotonic() - QUESTION_LEAD_SECONDS
+
+
+def question_frame(max_wait=15.0):
+    """The frame from while the last spoken question was asked; the newest frame for typed questions."""
+    asked, _question["time"] = _question["time"], None
+    if asked is not None and time.monotonic() - asked <= max_wait:
+        frame = latest_frame(at=asked)
+        if frame:
+            return frame
+    return latest_frame()
+
+
+def capture_frame(camera_index=0, warmup_frames=10):
+    """Open the camera for one picture when CAM is off. The first frames are dark, so skip a few."""
+    import cv2
+    camera = cv2.VideoCapture(camera_index)
+    try:
+        if not camera.isOpened():
+            return None
+        frame = None
+        for _ in range(warmup_frames):
+            ok, image = camera.read()
+            if ok:
+                frame = image
+        return _encode_snapshot(cv2, frame) if frame is not None else None
+    finally:
+        camera.release()
+
+
 def ensure_model():
     """Download the 8 MB model once."""
     if GESTURE_MODEL.exists() and GESTURE_MODEL.stat().st_size > 1_000_000:
@@ -197,6 +263,13 @@ class GestureWatcher:
                 failures = 0
 
                 # Ayna görüntüsü: sağ elini kaldırınca ekranda da sağda görünsün
+                # Görsel model için aynalanmamış kare: üzerindeki yazılar düz okunsun
+                if not _snapshots or tick - _snapshots[-1][0] >= SNAPSHOT_SECONDS:
+                    jpeg = _encode_snapshot(cv2, frame)
+                    if jpeg:
+                        with _snapshot_lock:
+                            _snapshots.append((tick, jpeg))
+
                 frame = cv2.flip(frame, 1)
                 height, width = frame.shape[:2]
                 small = cv2.resize(frame, (PROCESS_WIDTH, int(height * PROCESS_WIDTH / width)))
@@ -223,6 +296,8 @@ class GestureWatcher:
 
                 time.sleep(max(0.0, FRAME_SECONDS - (time.monotonic() - tick)))
         finally:
+            with _snapshot_lock:
+                _snapshots.clear()
             camera.release()
             recognizer.close()
             print("📷 Camera off")

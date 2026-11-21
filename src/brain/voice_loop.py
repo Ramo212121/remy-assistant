@@ -6,6 +6,7 @@ from src.config import SILENCE_TIMEOUT
 from src.hands.tools import change_volume, get_time, open_app
 from src.ears import listener
 from src.ears.listener import clear_buffer, listen, set_speaking
+from src.eyes.gestures import mark_question
 from src.ears.wake_word import load_model as load_wake_model, wait_for_wake_word
 from src.mouth.speaker import interrupt, load_voice, reset_interrupt, speak, wait_until_done, was_interrupted
 
@@ -155,6 +156,8 @@ def run_voice_loop(assistant, is_active=lambda: True, on_state=None, on_user=Non
                 _say("Goodbye!")
                 break
 
+            # "What is it?" sorulursa fotoğraf sorunun sorulduğu andan seçilsin
+            mark_question()
             print(f"\nYou: {user_input}")
             if on_user:
                 on_user(user_input)

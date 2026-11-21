@@ -17,6 +17,7 @@ GESTURE_MODEL = PROJECT_ROOT / "models" / "gesture_recognizer.task"
 LLM_MODEL = "openai/gpt-oss-120b"
 LLM_FALLBACK_MODEL = "openai/gpt-oss-20b"  # ayrı dakikalık limiti var
 STT_MODEL = "whisper-large-v3-turbo"
+VISION_MODEL = "qwen/qwen3.8-27b"  # "what is it?" için kameradan tek kare
 SILENCE_TIMEOUT = 30  # conversation mode ends after this many silent seconds
 
 _groq_client = None

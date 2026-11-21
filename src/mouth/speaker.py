@@ -126,23 +126,29 @@ def interrupt():
     _is_speaking = False
 
 
-def _listen_for_interrupt(proc, threshold=INTERRUPT_THRESHOLD):
-    """Listen to mic while afplay plays. Stop afplay if user speaks."""
-    def callback(indata, frames, time_info, status):
-        if not _is_speaking:
-            raise sd.CallbackStop()
+def _listen_for_interrupt(proc, threshold=INTERRUPT_THRESHOLD, poll_seconds=0.05):
+    """Listen to mic while afplay plays. Stop afplay if user speaks.
 
-        volume = np.linalg.norm(indata) / len(indata)
-        if volume > threshold:
-            print(f"🛑 Interrupt detected (volume: {volume:.4f})")
-            interrupt()
-            raise sd.CallbackStop()
+    The callback only raises a flag. Stopping the stream from inside its own
+    callback while this thread also stops it (leaving the `with` block)
+    deadlocks CoreAudio, and Remy then waits forever for speech to finish.
+    """
+    heard = threading.Event()
+    loudest = [0.0]
+
+    def callback(indata, frames, time_info, status):
+        volume = float(np.linalg.norm(indata) / len(indata))
+        if volume > threshold and not heard.is_set():
+            loudest[0] = volume
+            heard.set()
 
     try:
         with sd.InputStream(callback=callback, channels=1, samplerate=16000):
-            proc.wait()
-    except sd.CallbackStop:
-        pass
+            while proc.poll() is None:
+                if heard.wait(poll_seconds):
+                    print(f"🛑 Interrupt detected (volume: {loudest[0]:.4f})")
+                    interrupt()
+                    break
     except Exception as e:
         print(f"⚠️ Interrupt listener error: {e}")
 

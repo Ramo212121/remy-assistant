@@ -277,3 +277,38 @@ def test_message_log_has_timestamps():
     database.save_message("user", "hi")
     (role, content, stamp), = database.get_message_log(limit=1)
     assert (role, content) == ("user", "hi") and stamp[:4].isdigit()
+
+
+# ─── camera questions always take a new photo ───
+@pytest.mark.parametrize("text", [
+    "What am I holding in my hand?", "Rami, what am I holding on my hand?", "What is it?",
+    "what's this", "What do you see?", "Can you see this?", "Look at this", "Read this for me",
+])
+def test_camera_questions_force_the_camera(text):
+    assert assistant_module.tool_choice_for(text, 0, False) == assistant_module.FORCE_CAMERA
+
+
+@pytest.mark.parametrize("text", [
+    "What time is it?", "What is it like in Istanbul today?", "What's the date?", "Open Safari",
+])
+def test_other_questions_let_the_model_choose(text):
+    assert assistant_module.tool_choice_for(text, 0, False) == "auto"
+
+
+def test_only_the_first_round_is_forced():
+    assert assistant_module.tool_choice_for("What is it?", 1, False) == "auto"
+    assert assistant_module.tool_choice_for("What is it?", 4, True) == "none"
+
+
+def test_second_object_takes_a_second_photo(monkeypatch):
+    photos = iter(["A bottle.", "An apple."])
+    monkeypatch.setitem(tools.TOOL_FUNCTIONS, "look_at_camera", lambda question: next(photos))
+    client = FakeClient(
+        [tool_chunk("look_at_camera", '{"question": "What am I holding?"}', "c1")], [text_chunk("A bottle.")],
+        [tool_chunk("look_at_camera", '{"question": "What am I holding?"}', "c2")], [text_chunk("An apple.")],
+    )
+    bot = Assistant(client=client)
+    assert bot.respond("What am I holding?", lambda s: None) == "A bottle."
+    assert bot.respond("What am I holding?", lambda s: None) == "An apple."
+    forced = [r["tool_choice"] for r in client.requests]
+    assert forced == [assistant_module.FORCE_CAMERA, "auto", assistant_module.FORCE_CAMERA, "auto"]

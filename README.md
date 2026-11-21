@@ -25,7 +25,7 @@ Remy was built around three engineering principles:
 
 | Principle | Implementation |
 | :--- | :--- |
-| **Local where it can be** | The wake word, speaker check, hand gestures, speech output and screen analysis run on your Mac. Your commands and replies go to Groq for transcription and the LLM. |
+| **Local where it can be** | The wake word, speaker check, hand gestures, speech output and screen analysis run on your Mac. Your commands and replies go to Groq for transcription and the LLM, and so does a single camera photo when you ask "what is it?". |
 | **Low latency** | Replies are spoken sentence by sentence, about 2 to 3.5 seconds after you stop talking. |
 | **Extensible by design** | Every capability is a Python function with a JSON schema, registered in one file. |
 
@@ -128,7 +128,7 @@ flowchart TD
     TK --> Mouth
 
     subgraph Hands[🖐️ HANDS]
-        T1[16 Python Tools]
+        T1[17 Python Tools]
         T2[subprocess / osascript]
         T3[PyMuPDF / IMAP / DDG]
     end
@@ -177,7 +177,7 @@ flowchart TD
               ▼                        ▼
        ┌──────────────┐         ┌──────────────┐
        │    HANDS     │         │    MOUTH     │
-       │ 16 tools     │         │ Piper TTS    │
+       │ 17 tools     │         │ Piper TTS    │
        │ subprocess   │         │ afplay       │
        │ osascript    │         │ interrupt    │
        └──────┬───────┘         └──────┬───────┘
@@ -232,7 +232,7 @@ remy/
 │   │   └── speaker.py                # Piper TTS + afplay + interrupt
 │   │
 │   ├── hands/                        # Action layer
-│   │   ├── tools.py                  # 16 tool functions + JSON schemas
+│   │   ├── tools.py                  # 17 tool functions + JSON schemas
 │   │   └── reminder.py               # Background reminder scheduler
 │   │
 │   └── memory/                       # Persistence
@@ -364,6 +364,7 @@ Once woken, Remy stays in **conversation mode** until one of:
 | *"Search for the weather in Istanbul"* | DuckDuckGo search + summary |
 | *"Read my last 5 emails"* | Gmail unread summary via `read_email` |
 | *"What's on my screen?"* | Screenshot + vision analysis via `analyze_screen` |
+| *"What is it?"* (holding something up) | One camera photo, described by a vision model via `look_at_camera` |
 | *"Set volume to 40"* | System volume via `set_volume` |
 | *"Lock the screen"* | Locks macOS via `lock_screen` |
 | *"Set an alarm for 7 AM"* | Spoken alarm at 07:00 via `set_alarm` |
@@ -392,6 +393,7 @@ All tools are defined in `src/hands/tools.py` with JSON schemas for Groq's funct
 | 14 | `sleep_mac` | System | Put Mac to sleep |
 | 15 | `lock_screen` | System | Lock the screen |
 | 16 | `set_alarm` | Productivity | Spoken alarm at HH:MM |
+| 17 | `look_at_camera` | Vision | One camera photo + Groq `qwen3.8-27b` (local `moondream` as fallback) |
 
 ### Adding a New Tool
 
@@ -509,7 +511,7 @@ Every cloud component has a local drop-in replacement:
 ## 🛣️ Roadmap
 
 - [x] Wake word + VAD + STT + TTS pipeline
-- [x] 16 built-in tools with native function calling
+- [x] 17 built-in tools with native function calling
 - [x] Streaming LLM + streaming TTS
 - [x] Conversation mode with multi-tier exit
 - [x] Sci-fi HUD Flet desktop UI

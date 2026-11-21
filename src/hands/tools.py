@@ -198,6 +198,22 @@ def read_email(count=5):
 # Vision (Screen)
 # ─────────────────────────────────────────
 
+def look_at_camera(question="What is this?"):
+    """Take one picture with the Mac's camera and answer a question about it."""
+    # Kamera kütüphaneleri ağır; sadece bu araç çağrılınca yüklenir
+    from src.eyes.gestures import CAMERA_HELP, capture_frame, question_frame
+    from src.eyes.vision import describe
+
+    try:
+        frame = question_frame() or capture_frame()
+        if frame is None:
+            return f"Error: the camera isn't available. {CAMERA_HELP}"
+        # Etiket şart: "I see you holding..." gibi bir sonucu beyin kullanıcının sözü sanabiliyor
+        return f"Camera photo, taken just now. Tell the user what it shows: {describe(frame, question or 'What is this?')}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
 def analyze_screen():
     """Take a screenshot and analyze it with vision model."""
     try:
@@ -496,6 +512,23 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "look_at_camera",
+            "description": "Look through the Mac's camera at what the user is showing or holding, or at the user. Use for 'what is it', 'what is this', 'what am I holding', 'what do you see', 'can you read this'. Not for the screen.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The user's question about the camera view, e.g. 'What is this object?'"
+                    }
+                },
+                "required": ["question"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "set_volume",
             "description": "Set system volume (0-100)",
             "parameters": {
@@ -593,6 +626,7 @@ TOOL_FUNCTIONS = {
     "web_search": web_search,
     "read_email": read_email,
     "analyze_screen": analyze_screen,
+    "look_at_camera": look_at_camera,
     "set_volume": set_volume,
     "mute": mute,
     "unmute": unmute,

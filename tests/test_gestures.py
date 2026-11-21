@@ -216,3 +216,88 @@ def test_progress_fills_towards_the_hold():
     assert f.progress(5.0) == 1.0
     f.update("None", 0, 5.0)
     assert f.progress(5.1) == 0.0
+
+
+# ─── "what is it?" ───
+def test_look_at_camera_uses_the_live_frame(monkeypatch):
+    from src.eyes import gestures, vision
+    from src.hands import tools
+    monkeypatch.setattr(gestures, "question_frame", lambda: b"jpeg-bytes")
+    monkeypatch.setattr(gestures, "capture_frame", lambda: pytest.fail("should not open the camera"))
+    asked = []
+    monkeypatch.setattr(vision, "describe", lambda jpeg, q: asked.append((jpeg, q)) or "A coffee mug.")
+    assert tools.run_tool("look_at_camera", {"question": "What is it?"}).endswith("Tell the user what it shows: A coffee mug.")
+    assert asked == [(b"jpeg-bytes", "What is it?")]
+
+
+def test_look_at_camera_takes_one_picture_when_cam_is_off(monkeypatch):
+    from src.eyes import gestures, vision
+    from src.hands import tools
+    monkeypatch.setattr(gestures, "question_frame", lambda: None)
+    monkeypatch.setattr(gestures, "capture_frame", lambda: b"one-shot")
+    monkeypatch.setattr(vision, "describe", lambda jpeg, q: f"saw {jpeg.decode()}")
+    assert tools.look_at_camera("What is it?").endswith(": saw one-shot")
+
+
+def test_look_at_camera_without_camera(monkeypatch):
+    from src.eyes import gestures
+    from src.hands import tools
+    monkeypatch.setattr(gestures, "question_frame", lambda: None)
+    monkeypatch.setattr(gestures, "capture_frame", lambda: None)
+    assert tools.look_at_camera("What is it?").startswith("Error: the camera isn't available")
+
+
+def test_frame_from_while_the_question_was_asked(monkeypatch):
+    from src.eyes import gestures
+    clock = {"now": 100.0}
+    monkeypatch.setattr(gestures.time, "monotonic", lambda: clock["now"])
+    gestures._snapshots.clear()
+    gestures._snapshots.extend([(96.0, b"held up"), (98.0, b"asking"), (100.0, b"lowered")])
+    clock["now"] = 99.5
+    gestures.mark_question()                     # asked ~1.5 s before transcription finished
+    clock["now"] = 100.5
+    assert gestures.question_frame() == b"asking"
+    assert gestures.question_frame() == b"lowered"   # typed follow-up: newest frame
+    gestures._snapshots.clear()
+
+
+def test_frames_expire(monkeypatch):
+    from src.eyes import gestures
+    monkeypatch.setattr(gestures.time, "monotonic", lambda: 50.0)
+    gestures._snapshots.clear()
+    gestures._snapshots.append((40.0, b"old"))
+    assert gestures.latest_frame() is None
+    assert gestures.question_frame() is None
+    gestures._snapshots.clear()
+
+
+def test_vision_remembers_the_photo(monkeypatch):
+    from src.eyes import vision
+
+    class Reply:
+        choices = [type("C", (), {"message": type("M", (), {"content": "A mug."})()})()]
+
+    class Client:
+        def with_options(self, **kw):
+            return self
+        chat = type("Chat", (), {"completions": type("Comp", (), {"create": staticmethod(lambda **kw: Reply())})()})()
+
+    monkeypatch.setattr(vision, "get_groq_client", lambda: Client())
+    assert vision.describe(b"photo", "What is it?") == "A mug."
+    assert vision.last_frame() == b"photo"
+
+
+def test_vision_falls_back_to_local_model(monkeypatch):
+    import sys
+    import types
+    import groq
+    import httpx
+    from src.eyes import vision
+
+    def broken_client():
+        raise groq.APIConnectionError(request=httpx.Request("POST", "http://x"))
+
+    monkeypatch.setattr(vision, "get_groq_client", broken_client)
+    fake_ollama = types.SimpleNamespace(chat=lambda model, messages: {"message": {"content": " A mug. "}})
+    monkeypatch.setitem(sys.modules, "ollama", fake_ollama)
+    assert vision.describe(b"jpeg", "What is it?") == "A mug."

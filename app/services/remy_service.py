@@ -25,6 +25,7 @@ class RemyService:
         self._voice_thread = None
         self._caffeinate = None
         self._camera = None
+        self.on_snapshot = None   # on_snapshot(jpeg): the photo a camera answer was based on
         self._init_lock = threading.Lock()
         init_db()
 
@@ -80,6 +81,11 @@ class RemyService:
 
     def _tool(self, name, result):
         print(f"🛠️ {name}: {result[:80]}")
+        if name == "look_at_camera" and self.on_snapshot:
+            from src.eyes.vision import last_frame
+            jpeg = last_frame()
+            if jpeg:
+                self.on_snapshot(jpeg)
 
     def start_voice(self):
         """Start wake word + conversation mode."""
