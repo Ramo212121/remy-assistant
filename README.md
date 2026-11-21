@@ -54,15 +54,15 @@ Remy was built around three engineering principles:
 ### 🎨 Interface
 
 - **Flet desktop app** — Native macOS window
-- **Sci-fi HUD** — Dark grid background (`scripts/generate_hud_bg.py`), monospace type, bracketed panels
+- **Refined sci-fi HUD** — Aurora background in cyan, teal and violet (`scripts/generate_aurora_bg.py`), frosted-glass panels, one accent color, readable type
 - **Status waveform** — Animated bars with a color and motion for each state
 - **Live log** — Terminal-style transcript that fills sentence by sentence
 - **Always listening** — Voice mode starts with the app and keeps the Mac from idle sleep
 - **Typed messages** — Chat with Remy without using the mic
 - **Camera panel** — Live preview, the gesture the model sees, a hold bar that fills until the command fires, and the gesture list
-- **Icon buttons** — VOICE and CAM glow green when on; every tool key has an icon
+- **Icon buttons** — Voice and Camera turn cyan when on; every tool has an icon
 - **Timestamps** — Each log line shows its time; gestures appear in the log as SYS lines
-- **Live feedback** — The waveform panel glows in the state's color with a moving scan line
+- **Live feedback** — A status pill and the waveform take the state's color
 - **Tools panel** — 10 tools on demand, with dialogs for the ones that need input
 - **Stop control** — Stops playback and the running reply
 
@@ -239,12 +239,14 @@ remy/
 │       └── database.py               # SQLite schema + helpers
 │
 ├── assets/
-│   ├── hud_bg.png                    # App background
+│   ├── aurora_bg.png                 # Desktop app background
+│   ├── hud_bg.png                    # Earlier grid background
 │   └── logo.png                      # App logo
 │
 ├── models/                           # Gesture model, downloaded on first use (not in git)
 ├── scripts/
-│   └── generate_hud_bg.py            # Regenerates the background
+│   ├── generate_aurora_bg.py         # Regenerates the desktop background
+│   └── generate_hud_bg.py            # Regenerates the grid background
 ├── tests/                            # pytest suite (no mic or network needed)
 ├── mobile/                           # Android app (see mobile/README.md)
 ├── remy.py                           # Terminal entry point
