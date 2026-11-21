@@ -19,13 +19,13 @@ Natural voice interaction, real system control, and native tool calling — engi
 
 ## 📌 Overview
 
-**Remy** is a voice-controlled AI assistant that runs natively on macOS. It listens for the wake word **"Hey Remy"**, answers without a button press while the app is open, understands natural language through a streaming LLM, and executes real tasks on your machine — launching applications, reading PDFs, searching the web, checking email, adjusting system settings, and more.
+**Remy** is a voice-controlled AI assistant that runs natively on macOS. It listens for the wake word **"Hey Remy"** or a raised hand on the camera, answers without a button press while the app is open, understands natural language through a streaming LLM, and executes real tasks on your machine — launching applications, reading PDFs, searching the web, checking email, adjusting system settings, and more.
 
 Remy was built around three engineering principles:
 
 | Principle | Implementation |
 | :--- | :--- |
-| **Local where it can be** | The wake word, speaker check, speech output and screen analysis run on your Mac. Your commands and replies go to Groq for transcription and the LLM. |
+| **Local where it can be** | The wake word, speaker check, hand gestures, speech output and screen analysis run on your Mac. Your commands and replies go to Groq for transcription and the LLM. |
 | **Low latency** | Replies are spoken sentence by sentence, about 2 to 3.5 seconds after you stop talking. |
 | **Extensible by design** | Every capability is a Python function with a JSON schema, registered in one file. |
 
@@ -37,7 +37,7 @@ Remy was built around three engineering principles:
 
 - **Wake word detection** — "Hey Remy", transcribed on-device with `faster-whisper` (`tiny.en` first, `small.en` for unclear cases; about 535 MB in total, downloaded on first run)
 - **Speaker verification** — `Resemblyzer`; only the enrolled voice is accepted
-- **Voice Activity Detection** — `webrtcvad` (aggressiveness level 3)
+- **Voice Activity Detection** — `webrtcvad` (aggressiveness level 2, so it still catches speech from across the room)
 - **Speech-to-text** — Groq Whisper Large v3 Turbo
 - **Streaming TTS** — Piper + `afplay`, spoken sentence-by-sentence
 - **Barge-in / interrupt** — speak while Remy talks to stop playback
@@ -59,8 +59,29 @@ Remy was built around three engineering principles:
 - **Live log** — Terminal-style transcript that fills sentence by sentence
 - **Always listening** — Voice mode starts with the app and keeps the Mac from idle sleep
 - **Typed messages** — Chat with Remy without using the mic
+- **Camera panel** — Live preview, the gesture the model sees, a hold bar that fills until the command fires, and the gesture list
+- **Icon buttons** — VOICE and CAM glow green when on; every tool key has an icon
+- **Timestamps** — Each log line shows its time; gestures appear in the log as SYS lines
+- **Live feedback** — The waveform panel glows in the state's color with a moving scan line
 - **Tools panel** — 10 tools on demand, with dialogs for the ones that need input
 - **Stop control** — Stops playback and the running reply
+
+### 👁️ Hand Gestures
+
+Turn on **CAM** and Remy watches for hand gestures with Google's MediaPipe model. Recognition runs on the Mac at about 14 ms per frame; no frame is stored or sent anywhere.
+
+| Gesture | Action | Works when |
+| :--- | :--- | :--- |
+| ✋ Open palm, held ~1 s | Wake Remy, like saying "Hey Remy" | Voice is on |
+| 👍 Thumb up | End the conversation, like saying "bye" | Voice is on |
+| ✊ Fist | Stop Remy talking | Always |
+| ☝️ Pointing up | Volume +10% | Always |
+| 👎 Thumb down | Volume −10% | Always |
+| ✌️ Victory | Repeat the last reply | Always |
+| 🤟 I love you | Say the time, without asking the LLM | Always |
+| ✋→✊ Quick open-close | Open Google Chrome | Always |
+
+A gesture has to be held for a moment, fires once per hold, and two commands are at least 1.5 s apart.
 
 ### ⚙️ Reliability
 
@@ -75,7 +96,7 @@ Remy was built around three engineering principles:
 
 ## 🏗️ Architecture
 
-Remy is built as a **four-layer pipeline** — Ears, Brain, Hands, and Mouth — orchestrated around a SQLite memory store.
+Remy is built as a **five-layer pipeline** — Ears, Eyes, Brain, Hands, and Mouth — orchestrated around a SQLite memory store.
 
 ### Visual Overview
 
@@ -90,6 +111,12 @@ flowchart TD
     end
 
     Whisper --> Brain
+
+    Camera([📷 Camera]) --> Eyes
+    subgraph Eyes[👁️ EYES]
+        MP[MediaPipe gestures<br/>on-device]
+    end
+    Eyes -->|wake · stop · volume| Brain
 
     subgraph Brain[🧠 BRAIN]
         LLM[Groq LLM<br/>gpt-oss-120b]
@@ -124,6 +151,7 @@ flowchart TD
     style Hands fill:#FF9500,color:#fff
     style Mouth fill:#FF2D55,color:#fff
     style Memory fill:#8E8E93,color:#fff
+    style Eyes fill:#5AC8FA,color:#fff
 ```
 
 ### Terminal View
@@ -165,7 +193,7 @@ flowchart TD
 
 ### Data Flow
 
-1. **Wake** — Local Whisper hears "Hey Remy"
+1. **Wake** — Local Whisper hears "Hey Remy", or MediaPipe sees a held ✋
 2. **Listen** — `webrtcvad` captures the utterance, `Resemblyzer` verifies the speaker
 3. **Transcribe** — Groq Whisper returns the text
 4. **Reason** — Groq LLM streams tokens; if a tool is needed, it emits a `tool_call`
@@ -181,7 +209,7 @@ flowchart TD
 remy/
 │
 ├── app/                              # Flet desktop application
-│   ├── main.py                       # UI entry point (Apple-style)
+│   ├── main.py                       # UI entry point (sci-fi HUD)
 │   └── services/
 │       └── remy_service.py           # UI ↔ backend bridge
 │
@@ -192,6 +220,9 @@ remy/
 │   │   ├── assistant.py              # LLM streaming + tool calling + memory
 │   │   ├── commands.py               # Exit / shutdown phrases
 │   │   └── voice_loop.py             # Wake word → conversation loop
+│   │
+│   ├── eyes/                         # Camera input
+│   │   └── gestures.py               # MediaPipe gestures + hold/combo filter
 │   │
 │   ├── ears/                         # Input layer
 │   │   ├── wake_word.py              # "Hey Remy" detection (local)
@@ -211,6 +242,7 @@ remy/
 │   ├── hud_bg.png                    # App background
 │   └── logo.png                      # App logo
 │
+├── models/                           # Gesture model, downloaded on first use (not in git)
 ├── scripts/
 │   └── generate_hud_bg.py            # Regenerates the background
 ├── tests/                            # pytest suite (no mic or network needed)
@@ -281,6 +313,14 @@ python remy.py
 python app/main.py
 ```
 
+**Terminal with gestures:**
+
+```bash
+python remy.py --camera
+```
+
+The first time, macOS asks for camera access for the app you start Remy from (Terminal or VS Code). The gesture model (8 MB) downloads to `models/` on first use.
+
 **Tests:**
 
 ```bash
@@ -302,7 +342,7 @@ python -m pytest tests
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Keep the app open and the lid up. Voice mode starts with the app, and it stops the Mac from idle sleep while it listens. Use the `VOICE: ON` button to turn the microphone off. For better range, raise the input level in System Settings → Sound → Input.
+Keep the app open and the lid up. Voice mode starts with the app, and it stops the Mac from idle sleep while it listens. Use the **VOICE ON** button to turn the microphone off, and **CAM** for hand gestures. For better range, raise the input level in System Settings → Sound → Input.
 
 ### Conversation Mode
 
@@ -411,6 +451,17 @@ Edit `SYSTEM_PROMPT` in `src/brain/assistant.py` to customize Remy's tone, tool-
 
 Edit `WAKE_PATTERN` in `src/ears/wake_word.py`. It is a regular expression over the locally transcribed text, so any phrase works.
 
+### Hand Gestures
+
+Edit `src/eyes/gestures.py`:
+
+```python
+ACTIONS = {"Open_Palm": "wake", "Closed_Fist": "stop", ...}   # gesture → action
+GestureFilter(hold_seconds=0.4, wake_hold_seconds=0.8, cooldown_seconds=1.5)
+```
+
+The app that the open-close gesture launches is `OPEN_CLOSE_APP` in `src/brain/voice_loop.py`.
+
 ### Speaker Verification
 
 Edit `src/ears/listener.py`:
@@ -451,6 +502,7 @@ Every cloud component has a local drop-in replacement:
 | **Email** | [IMAPClient](https://imapclient.readthedocs.io/) | Gmail read access |
 | **Web Search** | [ddgs](https://github.com/deedy5/ddgs) | DuckDuckGo search |
 | **Vision** | Ollama `moondream` | Local screenshot analysis |
+| **Gestures** | [MediaPipe](https://ai.google.dev/edge/mediapipe) + [OpenCV](https://opencv.org/) | On-device hand gesture recognition and camera capture |
 
 ---
 
@@ -465,6 +517,7 @@ Every cloud component has a local drop-in replacement:
 - [x] Speaker verification
 - [x] **v1.0 release**
 - [x] Android app (`mobile/`): push-to-talk, Groq directly, HUD design
+- [x] Hand gestures from the Mac camera (MediaPipe, on-device)
 - [ ] Fully offline mode (Ollama + `faster-whisper` + Piper)
 - [ ] Plugin system for user-defined tools
 - [ ] Multi-language support (Turkish, English)
@@ -515,6 +568,7 @@ Standing on the shoulders of excellent open-source work:
 - **[Resemblyzer](https://github.com/resemble-ai/Resemblyzer)** — Speaker verification
 - **[Flet](https://flet.dev/)** — Beautiful cross-platform UI in pure Python
 - **[Ollama](https://ollama.com/)** — Local vision model runtime
+- **[MediaPipe](https://ai.google.dev/edge/mediapipe)** — On-device hand gesture recognition
 
 ---
 

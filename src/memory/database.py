@@ -92,3 +92,13 @@ def mark_done(reminder_id):
     cur.execute("UPDATE reminders SET done = 1 WHERE id = ?", (reminder_id,))
     con.commit()
     con.close()
+
+
+def get_message_log(limit=10):
+    """Like get_messages, with the timestamp, for the transcript."""
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    cur.execute("SELECT role, content, timestamp FROM messages ORDER BY id DESC LIMIT ?", (limit,))
+    rows = cur.fetchall()
+    con.close()
+    return rows

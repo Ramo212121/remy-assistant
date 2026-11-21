@@ -38,6 +38,7 @@ def tint(color, opacity):
 LINE = tint(CYAN, 0.28)
 FIELD_BORDER = ft.OutlineInputBorder(border_radius=2, side=ft.BorderSide(1, LINE))
 SQUARE = ft.RoundedRectangleBorder(radius=2)
+SMOOTH = ft.Animation(300, ft.AnimationCurve.EASE_OUT)
 
 # state → (tag, hint, color, bar height range as a share of the panel)
 STATES = {
@@ -55,6 +56,8 @@ BAR_MAX_HEIGHT = 46
 BAR_MIN_HEIGHT = 2
 FRAME_SECONDS = 0.14
 IDLE_SECONDS = 0.5
+WAVE_HEIGHT = 92
+SCAN_STEP = 9
 
 # role → (tag, tag color, text color)
 LOG_STYLES = {
@@ -63,13 +66,45 @@ LOG_STYLES = {
     "tool": ("SYS", AMBER, AMBER),
 }
 
+# Kamera: model etiketi → simge, ve hareket listesi
+GESTURE_ICONS = {
+    "PALM": "✋", "FIST": "✊", "THUMB UP": "👍", "POINT UP": "☝️",
+    "THUMB DOWN": "👎", "VICTORY": "✌️", "LOVE": "🤟",
+}
+GESTURE_LEGEND = [
+    ("✋", "hold", "wake"), ("✊", "", "stop"), ("👍", "", "end chat"), ("☝️", "", "vol +"),
+    ("👎", "", "vol −"), ("✌️", "", "repeat"), ("🤟", "", "time"), ("✋✊", "quick", "Chrome"),
+]
+GESTURE_HINTS = {
+    "wake": "✋ PALM: LISTENING",
+    "stop": "✊ FIST: STOPPED",
+    "done": "👍 THUMB UP: CONVERSATION ENDED",
+    "volume_up": "☝️ POINT UP: VOLUME UP",
+    "volume_down": "👎 THUMB DOWN: VOLUME DOWN",
+    "repeat": "✌️ VICTORY: REPEATING",
+    "time": "🤟 LOVE: TELLING THE TIME",
+    "open_chrome": "✋→✊ OPEN-CLOSE: OPENING CHROME",
+}
+PREVIEW_WIDTH = 168
+PREVIEW_HEIGHT = 126
+
+
+def stamp(value=None):
+    """HH:MM for a log line; value is an ISO timestamp from the database."""
+    if value:
+        try:
+            return datetime.fromisoformat(value).strftime("%H:%M")
+        except ValueError:
+            return "--:--"
+    return datetime.now().strftime("%H:%M")
+
 
 def main(page: ft.Page):
     page.title = "Remy"
     page.window.width = 440
-    page.window.height = 860
+    page.window.height = 900
     page.window.min_width = 400
-    page.window.min_height = 640
+    page.window.min_height = 680
     page.bgcolor = VOID
     page.padding = 0
     page.spacing = 0
@@ -85,10 +120,37 @@ def main(page: ft.Page):
             # Pencere kapanırken arka plan thread'leri buraya düşebilir
             print(f"UI update skipped: {e}")
 
+    def corner(color=CYAN, size=10, **position):
+        """One L-shaped bracket. position: left/right + top/bottom."""
+        side = ft.BorderSide(1.5, color)
+        none = ft.BorderSide(0, "transparent")
+        return ft.Container(
+            width=size, height=size,
+            border=ft.Border(
+                left=side if "left" in position else none,
+                right=side if "right" in position else none,
+                top=side if "top" in position else none,
+                bottom=side if "bottom" in position else none,
+            ),
+            **position,
+        )
+
+    def brackets(color=CYAN, size=10):
+        return [
+            corner(color, size, left=0, top=0), corner(color, size, right=0, top=0),
+            corner(color, size, left=0, bottom=0), corner(color, size, right=0, bottom=0),
+        ]
+
     # ─── Top bar ───
     state_tag = ft.Text(STATES["idle"][0], size=11, weight=ft.FontWeight.W_700,
                         color=STATES["idle"][2], style=ft.TextStyle(letter_spacing=1.5))
-    state_dot = ft.Container(width=6, height=6, bgcolor=STATES["idle"][2])
+    state_dot = ft.Container(width=6, height=6, bgcolor=STATES["idle"][2], animate=SMOOTH)
+    state_chip = ft.Container(
+        content=ft.Row([state_dot, state_tag], spacing=7, tight=True),
+        padding=ft.Padding.symmetric(horizontal=9, vertical=4),
+        border=ft.Border.all(1, tint(TEXT_DIM, 0.4)),
+        animate=SMOOTH,
+    )
     clock = ft.Text("--:--:--", size=11, color=TEXT_DIM)
 
     top_bar = ft.Container(
@@ -97,14 +159,12 @@ def main(page: ft.Page):
                 ft.Text("REMY", size=15, weight=ft.FontWeight.W_700, color=CYAN,
                         style=ft.TextStyle(letter_spacing=6)),
                 ft.Container(expand=True),
-                state_dot,
-                state_tag,
-                ft.Text("|", size=11, color=LINE),
+                state_chip,
                 clock,
             ],
-            spacing=8,
+            spacing=10,
         ),
-        padding=ft.Padding.only(left=16, right=16, top=16, bottom=12),
+        padding=ft.Padding.only(left=16, right=16, top=14, bottom=11),
         border=ft.Border.only(bottom=ft.BorderSide(1, LINE)),
     )
 
@@ -117,44 +177,95 @@ def main(page: ft.Page):
     hint = ft.Text(STATES["idle"][1], size=10, color=TEXT_DIM, max_lines=1,
                    overflow=ft.TextOverflow.ELLIPSIS, style=ft.TextStyle(letter_spacing=1))
 
-    def corner(color=CYAN, **position):
-        """One L-shaped bracket. position: left/right + top/bottom."""
-        side = ft.BorderSide(1.5, color)
-        none = ft.BorderSide(0, "transparent")
-        return ft.Container(
-            width=10, height=10,
-            border=ft.Border(
-                left=side if "left" in position else none,
-                right=side if "right" in position else none,
-                top=side if "top" in position else none,
-                bottom=side if "bottom" in position else none,
-            ),
-            **position,
+    # Aktifken panelin içinde yukarıdan aşağı inen ince tarama çizgisi
+    scan_line = ft.Container(
+        left=0, right=0, top=0, height=2, bgcolor=tint(CYAN, 0.0),
+        animate_position=ft.Animation(int(FRAME_SECONDS * 1000), ft.AnimationCurve.LINEAR),
+    )
+    wave_frame = ft.Container(
+        content=ft.Stack(
+            [
+                ft.Container(
+                    left=0, right=0, top=0, bottom=0,
+                    content=ft.Column(
+                        [
+                            ft.Row(bars, spacing=3, height=BAR_MAX_HEIGHT,
+                                   alignment=ft.MainAxisAlignment.CENTER,
+                                   vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                            hint,
+                        ],
+                        spacing=6,
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ),
+                scan_line,
+                *brackets(),
+            ],
+        ),
+        height=WAVE_HEIGHT,
+        bgcolor=tint(PANEL, 0.7),
+        border=ft.Border.all(1, tint(CYAN, 0.0)),
+        animate=SMOOTH,
+    )
+
+    # ─── Camera panel (only while CAM is on) ───
+    camera_image = ft.Image(src=b"", width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT,
+                            fit=ft.BoxFit.COVER, gapless_playback=True)
+    camera_live = ft.Text("● LIVE", size=9, weight=ft.FontWeight.W_700, color=RED)
+    gesture_name = ft.Text("NO HAND", size=17, weight=ft.FontWeight.W_700, color=TEXT_DIM,
+                           style=ft.TextStyle(letter_spacing=1))
+    gesture_hold = ft.ProgressBar(value=0, color=CYAN, bgcolor=tint(CYAN, 0.12), bar_height=3)
+    def legend_row(icon, note, action):
+        return ft.Row(
+            [
+                ft.Text(icon, size=12, width=30, no_wrap=True),
+                ft.Text(action.upper(), size=10, color=TEXT_PRIMARY, weight=ft.FontWeight.W_600, no_wrap=True),
+                ft.Text(note, size=9, color=TEXT_DIM, no_wrap=True),
+            ],
+            spacing=3,
         )
 
-    wave_panel = ft.Stack(
+    # İki sütun: panel kısa kalsın, konuşma alanından yer çalmasın
+    half = (len(GESTURE_LEGEND) + 1) // 2
+    legend = ft.Row(
         [
-            ft.Container(
-                left=0, right=0, top=0, bottom=0,
-                bgcolor=tint(PANEL, 0.7),
-                content=ft.Column(
-                    [
-                        ft.Row(bars, spacing=3, height=BAR_MAX_HEIGHT,
-                               alignment=ft.MainAxisAlignment.CENTER,
-                               vertical_alignment=ft.CrossAxisAlignment.CENTER),
-                        hint,
-                    ],
-                    spacing=6,
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-            ),
-            corner(left=0, top=0),
-            corner(right=0, top=0),
-            corner(left=0, bottom=0),
-            corner(right=0, bottom=0),
+            ft.Column([legend_row(*item) for item in GESTURE_LEGEND[:half]], spacing=2, expand=True),
+            ft.Column([legend_row(*item) for item in GESTURE_LEGEND[half:]], spacing=2, expand=True),
         ],
-        height=92,
+        spacing=4,
+        vertical_alignment=ft.CrossAxisAlignment.START,
+    )
+    camera_panel = ft.Container(
+        content=ft.Row(
+            [
+                ft.Stack(
+                    [
+                        camera_image,
+                        ft.Container(content=camera_live, left=6, top=5),
+                        *brackets(GREEN, 12),
+                    ],
+                    width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT,
+                ),
+                ft.Column(
+                    [
+                        ft.Text("GESTURE", size=9, color=TEXT_DIM, style=ft.TextStyle(letter_spacing=2)),
+                        gesture_name,
+                        gesture_hold,
+                        ft.Container(height=2),
+                        legend,
+                    ],
+                    spacing=3,
+                    expand=True,
+                ),
+            ],
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        ),
+        padding=8,
+        bgcolor=tint(PANEL, 0.8),
+        border=ft.Border.all(1, tint(GREEN, 0.4)),
+        visible=False,
     )
 
     # ─── Log ───
@@ -165,34 +276,42 @@ def main(page: ft.Page):
     )
     log = ft.ListView(
         controls=[empty_state],
-        spacing=6,
+        spacing=8,
         expand=True,
         padding=ft.Padding.symmetric(vertical=10),
     )
 
-    def make_entry(role, text):
+    def make_entry(role, text, when=None):
         tag, tag_color, text_color = LOG_STYLES[role]
-        label = ft.Text(text, size=13, color=text_color, selectable=True, expand=True)
+        label = ft.Text(text, size=14, color=text_color, selectable=True, expand=True,
+                        style=ft.TextStyle(height=1.4))
         entry = ft.Container(
             content=ft.Row(
                 [
-                    ft.Text(tag, size=11, weight=ft.FontWeight.W_700, color=tag_color),
+                    ft.Column(
+                        [
+                            ft.Text(tag, size=11, weight=ft.FontWeight.W_700, color=tag_color),
+                            ft.Text(stamp(when), size=9, color=TEXT_DIM),
+                        ],
+                        spacing=1,
+                        tight=True,
+                    ),
                     label,
                 ],
-                spacing=10,
+                spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.START,
             ),
-            padding=ft.Padding.symmetric(horizontal=10, vertical=7),
+            padding=ft.Padding.only(left=12, right=12, top=9, bottom=9),
             border=ft.Border.only(left=ft.BorderSide(2, tag_color)),
-            bgcolor=tint(tag_color, 0.06) if role == "user" else tint(PANEL, 0.55),
+            bgcolor=tint(tag_color, 0.07) if role == "user" else tint(PANEL, 0.6),
         )
         entry.data = label
         return entry
 
-    def append_entry(role, text):
+    def append_entry(role, text, when=None):
         if empty_state in log.controls:
             log.controls.remove(empty_state)
-        entry = make_entry(role, text)
+        entry = make_entry(role, text, when)
         log.controls.append(entry)
         del log.controls[:-MAX_ENTRIES]
         return entry
@@ -200,7 +319,7 @@ def main(page: ft.Page):
     async def _scroll_to_end():
         # Önce yeni satırın yerleşimi hesaplansın, yoksa altı kırpılır
         await asyncio.sleep(0.1)
-        await log.scroll_to(offset=-1, duration=150)
+        await log.scroll_to(offset=-1, duration=200)
 
     def refresh_and_scroll():
         refresh()
@@ -229,12 +348,14 @@ def main(page: ft.Page):
         refresh_and_scroll()
 
     # ─── Controls ───
-    def hud_button(text, color=CYAN, on_click=None, expand=False):
+    def hud_button(text, color=CYAN, icon=None, on_click=None, expand=False):
         label = ft.Text(text, size=11, weight=ft.FontWeight.W_700, color=color,
                         style=ft.TextStyle(letter_spacing=1))
+        icon_control = ft.Icon(icon, size=15, color=color) if icon else None
         button = ft.Container(
-            content=label,
-            height=34,
+            content=ft.Row([c for c in (icon_control, label) if c], spacing=6, tight=True,
+                           alignment=ft.MainAxisAlignment.CENTER),
+            height=36,
             expand=expand,
             alignment=ft.Alignment.CENTER,
             padding=ft.Padding.symmetric(horizontal=10),
@@ -242,13 +363,27 @@ def main(page: ft.Page):
             bgcolor=tint(color, 0.06),
             ink=True,
             on_click=on_click,
+            animate=SMOOTH,
         )
-        button.data = label
+        button.data = {"label": label, "icon": icon_control}
         return button
 
-    voice_button = hud_button("VOICE: OFF", TEXT_DIM, expand=True)
-    tools_button = hud_button("TOOLS", CYAN, expand=True)
-    stop_button = hud_button("STOP", RED, expand=True)
+    def paint_toggle(button, name, active, on_icon, off_icon):
+        """ON: green with a soft glow. OFF: dim."""
+        color = GREEN if active else TEXT_DIM
+        parts = button.data
+        parts["label"].value = f"{name} {'ON' if active else 'OFF'}"
+        parts["label"].color = color
+        parts["icon"].icon = on_icon if active else off_icon
+        parts["icon"].color = color
+        button.border = ft.Border.all(1, tint(color, 0.6 if active else 0.35))
+        button.bgcolor = tint(color, 0.1 if active else 0.03)
+        button.shadow = ft.BoxShadow(blur_radius=12, color=tint(GREEN, 0.25)) if active else None
+
+    voice_button = hud_button("VOICE OFF", TEXT_DIM, ft.Icons.MIC_OFF, expand=True)
+    camera_button = hud_button("CAM OFF", TEXT_DIM, ft.Icons.VIDEOCAM_OFF, expand=True)
+    tools_button = hud_button("TOOLS", CYAN, ft.Icons.TUNE, expand=True)
+    stop_button = hud_button("STOP", RED, ft.Icons.STOP_CIRCLE, expand=True)
     stop_button.visible = False
 
     def on_state(state):
@@ -256,26 +391,27 @@ def main(page: ft.Page):
         if state in STATES:
             tag, text, color, _ = STATES[state]
             state_tag.value = tag
-            state_tag.color = color
-            state_dot.bgcolor = color
             hint.value = text
             hint.color = TEXT_DIM
-            for bar in bars:
-                bar.bgcolor = color
         else:
-            state_tag.value = "ERROR"
-            state_tag.color = RED
-            state_dot.bgcolor = RED
+            tag, color = "ERROR", RED
+            state_tag.value = tag
             hint.value = state[:70].upper()
             hint.color = RED
+        state_tag.color = color
+        state_dot.bgcolor = color
+        state_chip.border = ft.Border.all(1, tint(color, 0.5))
+        for bar in bars:
+            bar.bgcolor = color
+
+        # Aktif durumlarda panel durum renginde hafifçe parlar
+        active_state = state in STATES and state != "idle"
+        wave_frame.border = ft.Border.all(1, tint(color, 0.45 if active_state else 0.0))
+        wave_frame.shadow = ft.BoxShadow(blur_radius=22, color=tint(color, 0.22)) if active_state else None
+        scan_line.bgcolor = tint(color, 0.35 if active_state else 0.0)
 
         stop_button.visible = state in BUSY_STATES
-        active = service.voice_active
-        voice_color = GREEN if active else TEXT_DIM
-        voice_button.data.value = "VOICE: ON" if active else "VOICE: OFF"
-        voice_button.data.color = voice_color
-        voice_button.border = ft.Border.all(1, tint(voice_color, 0.55))
-        voice_button.bgcolor = tint(voice_color, 0.1 if active else 0.04)
+        paint_toggle(voice_button, "VOICE", service.voice_active, ft.Icons.MIC, ft.Icons.MIC_OFF)
         refresh()
 
     service = RemyService(on_state=on_state, on_message=on_message, on_sentence=on_sentence)
@@ -295,12 +431,60 @@ def main(page: ft.Page):
     voice_button.on_click = toggle_voice
     stop_button.on_click = stop_speaking
 
-    # ─── Waveform + clock ───
+    # ─── Camera gestures ───
+    def paint_camera():
+        active = service.camera_active
+        paint_toggle(camera_button, "CAM", active, ft.Icons.VIDEOCAM, ft.Icons.VIDEOCAM_OFF)
+        camera_panel.visible = active
+        if not active:
+            camera_image.src = b""
+            gesture_name.value = "NO HAND"
+            gesture_name.color = TEXT_DIM
+            gesture_hold.value = 0
+
+    def on_camera_preview(jpeg, label, progress):
+        camera_image.src = jpeg
+        if label:
+            gesture_name.value = f"{GESTURE_ICONS.get(label, '')} {label}"
+            gesture_name.color = GREEN if progress >= 1 else CYAN
+        else:
+            gesture_name.value = "NO HAND"
+            gesture_name.color = TEXT_DIM
+        gesture_hold.value = progress
+        refresh()
+
+    def on_gesture(action):
+        if action in ("wake", "done") and not service.voice_active:
+            message = "Turn voice on to use this gesture"
+        else:
+            message = GESTURE_HINTS[action]
+        hint.value = message.upper()
+        hint.color = CYAN
+        append_entry("tool", message)
+        refresh_and_scroll()
+
+    def on_camera_error(message):
+        service.stop_camera()
+        paint_camera()
+        on_message("tool", f"Camera: {message}")
+
+    def toggle_camera(e):
+        if service.camera_active:
+            service.stop_camera()
+        else:
+            service.start_camera(on_camera_preview, on_gesture, on_camera_error)
+        paint_camera()
+        refresh()
+
+    camera_button.on_click = toggle_camera
+
+    # ─── Waveform, scan line and clock ───
     # Dalga durumu gösteren bir animasyon, gerçek mikrofon seviyesi değil
     def animation_loop():
         rng = random.Random()
         phase = 0.0
         flat = False
+        scan = 0
         while True:
             state = current["state"]
             level = STATES[state][3] if state in STATES else 0.0
@@ -328,6 +512,9 @@ def main(page: ft.Page):
                     shape = rng.random()
                 height = BAR_MIN_HEIGHT + BAR_MAX_HEIGHT * level * envelope * shape
                 bar.height = min(BAR_MAX_HEIGHT, height)
+
+            scan = (scan + SCAN_STEP) % (WAVE_HEIGHT - 2)
+            scan_line.top = scan
             refresh()
             time.sleep(FRAME_SECONDS)
 
@@ -419,8 +606,8 @@ def main(page: ft.Page):
     def quick(label, tool):
         return lambda e: service.run_tool(label, tool)
 
-    def tool_key(text, tooltip, handler):
-        key = hud_button(text, TEXT_DIM, on_click=handler, expand=True)
+    def tool_key(text, tooltip, icon, handler):
+        key = hud_button(text, TEXT_DIM, icon, on_click=handler, expand=True)
         key.tooltip = tooltip
         return key
 
@@ -429,21 +616,21 @@ def main(page: ft.Page):
         [
             ft.Row(
                 [
-                    tool_key("TIME", "Time", quick("Time", "get_time")),
-                    tool_key("DATE", "Date", quick("Date", "get_date")),
-                    tool_key("WEB", "Web", web_action),
-                    tool_key("PDF", "PDF", pdf_action),
-                    tool_key("MAIL", "Mail", quick("Mail", "read_email")),
+                    tool_key("TIME", "Time", ft.Icons.SCHEDULE, quick("Time", "get_time")),
+                    tool_key("DATE", "Date", ft.Icons.EVENT, quick("Date", "get_date")),
+                    tool_key("WEB", "Web", ft.Icons.PUBLIC, web_action),
+                    tool_key("PDF", "PDF", ft.Icons.DESCRIPTION, pdf_action),
+                    tool_key("MAIL", "Mail", ft.Icons.MAIL_OUTLINE, quick("Mail", "read_email")),
                 ],
                 spacing=6,
             ),
             ft.Row(
                 [
-                    tool_key("SCRN", "Screen", quick("Screen", "analyze_screen")),
-                    tool_key("VOL", "Volume", volume_action),
-                    tool_key("BRGT", "Bright", brightness_action),
-                    tool_key("ALRM", "Alarm", alarm_action),
-                    tool_key("RMND", "Remind", reminder_action),
+                    tool_key("SCRN", "Screen", ft.Icons.MONITOR, quick("Screen", "analyze_screen")),
+                    tool_key("VOL", "Volume", ft.Icons.VOLUME_UP, volume_action),
+                    tool_key("BRGT", "Bright", ft.Icons.LIGHT_MODE, brightness_action),
+                    tool_key("ALRM", "Alarm", ft.Icons.ALARM, alarm_action),
+                    tool_key("RMND", "Remind", ft.Icons.NOTIFICATIONS_NONE, reminder_action),
                 ],
                 spacing=6,
             ),
@@ -454,7 +641,9 @@ def main(page: ft.Page):
 
     def toggle_tools(e):
         tools_panel.visible = not tools_panel.visible
-        tools_button.data.value = "CLOSE TOOLS" if tools_panel.visible else "TOOLS"
+        parts = tools_button.data
+        parts["label"].value = "CLOSE" if tools_panel.visible else "TOOLS"
+        parts["icon"].icon = ft.Icons.CLOSE if tools_panel.visible else ft.Icons.TUNE
         refresh_and_scroll()
 
     tools_button.on_click = toggle_tools
@@ -488,7 +677,7 @@ def main(page: ft.Page):
             [
                 ft.Text(">", size=14, weight=ft.FontWeight.W_700, color=CYAN),
                 composer,
-                hud_button("SEND", CYAN, on_click=send),
+                hud_button("SEND", CYAN, ft.Icons.SEND, on_click=send),
             ],
             spacing=8,
         ),
@@ -503,9 +692,10 @@ def main(page: ft.Page):
             ft.Container(
                 content=ft.Column(
                     [
-                        wave_panel,
+                        wave_frame,
+                        camera_panel,
                         log,
-                        ft.Row([voice_button, tools_button, stop_button], spacing=6),
+                        ft.Row([voice_button, camera_button, tools_button, stop_button], spacing=6),
                         tools_panel,
                         command_line,
                     ],
@@ -523,13 +713,14 @@ def main(page: ft.Page):
 
     page.add(ft.Container(
         content=layout,
+        bgcolor=VOID,
         image=ft.DecorationImage(src="hud_bg.png", fit=ft.BoxFit.COVER),
         expand=True,
     ))
 
-    for role, text in service.history():
+    for role, text, when in service.history():
         if text:
-            append_entry("user" if role == "user" else "remy", text)
+            append_entry("user" if role == "user" else "remy", text, when)
     refresh_and_scroll()
 
     service.start_background()

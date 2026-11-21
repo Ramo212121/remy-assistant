@@ -12,6 +12,7 @@ VOICE_SAMPLE = PROJECT_ROOT / "my_voice.wav"
 TEMP_AUDIO = PROJECT_ROOT / "temp.flac"
 TTS_MODEL = PROJECT_ROOT / "en_US-ryan-high.onnx"
 ASSETS_DIR = PROJECT_ROOT / "assets"
+GESTURE_MODEL = PROJECT_ROOT / "models" / "gesture_recognizer.task"
 
 LLM_MODEL = "openai/gpt-oss-120b"
 LLM_FALLBACK_MODEL = "openai/gpt-oss-20b"  # ayrı dakikalık limiti var

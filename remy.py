@@ -1,6 +1,8 @@
-"""Terminal entry point: python remy.py"""
+"""Terminal entry point: python remy.py (add --camera for hand gestures)"""
+import sys
+
 from src.brain.assistant import Assistant
-from src.brain.voice_loop import run_voice_loop
+from src.brain.voice_loop import handle_gesture, run_voice_loop
 from src.ears.listener import close_stream
 from src.hands.reminder import start_reminder_checker
 from src.memory.database import init_db
@@ -11,8 +13,17 @@ def main():
     start_reminder_checker()
     assistant = Assistant()
 
+    camera = None
+    if "--camera" in sys.argv:
+        from src.eyes.gestures import GestureWatcher
+        camera = GestureWatcher(handle_gesture, on_error=lambda message: print(f"⚠️ {message}"))
+        camera.start()
+
     print("Remy is ready!")
     print("Say 'Hey Remy' to start. Say 'bye' to end. Say 'shutdown remy' to quit.")
+    if camera:
+        print("Gestures: ✋ wake, ✊ stop talking, 👍 end conversation, ☝️ volume up, "
+              "👎 volume down, ✌️ repeat, 🤟 time, ✋→✊ open-close opens Chrome.")
     print("-" * 40)
 
     try:
@@ -21,6 +32,8 @@ def main():
     except KeyboardInterrupt:
         print("\n\n👋 Interrupted by user.")
     finally:
+        if camera:
+            camera.stop()
         close_stream()
         print("\n🔇 Stream closed.")
 

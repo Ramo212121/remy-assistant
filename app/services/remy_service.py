@@ -4,7 +4,7 @@ import subprocess
 import threading
 import time
 
-from src.memory.database import get_messages, init_db
+from src.memory.database import get_message_log, init_db
 
 
 RESTART_DELAY_SECONDS = 2
@@ -24,6 +24,7 @@ class RemyService:
         self._voice_active = False
         self._voice_thread = None
         self._caffeinate = None
+        self._camera = None
         self._init_lock = threading.Lock()
         init_db()
 
@@ -44,8 +45,8 @@ class RemyService:
         threading.Thread(target=self._get_assistant, daemon=True).start()
 
     def history(self, limit=10):
-        """Recent messages, oldest first, for the transcript."""
-        return list(reversed(get_messages(limit=limit)))
+        """Recent (role, content, timestamp) rows, oldest first, for the transcript."""
+        return list(reversed(get_message_log(limit=limit)))
 
     @property
     def voice_active(self):
@@ -138,6 +139,31 @@ class RemyService:
     def stop_speaking(self):
         from src.mouth.speaker import interrupt
         interrupt()
+
+    @property
+    def camera_active(self):
+        return self._camera is not None and self._camera.running
+
+    def start_camera(self, on_preview, on_gesture, on_error):
+        """Watch for hand gestures. on_gesture(action) lets the UI show what happened."""
+        from src.eyes.gestures import GestureWatcher
+
+        def on_action(action):
+            from src.brain.voice_loop import handle_gesture
+            # Uyandırma ve bitirme sadece sesli mod açıkken anlamlı; diğerleri her zaman çalışır
+            if action not in ("wake", "done") or self._voice_active:
+                handle_gesture(action)
+            on_gesture(action)
+
+        if self.camera_active:
+            return
+        self._camera = GestureWatcher(on_action, on_preview=on_preview, on_error=on_error)
+        self._camera.start()
+
+    def stop_camera(self):
+        if self._camera is not None:
+            self._camera.stop()
+            self._camera = None
 
     def run_tool(self, label, name, args=None):
         """Run a quick action and show the result as a chat message."""

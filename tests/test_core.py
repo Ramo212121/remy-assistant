@@ -271,3 +271,9 @@ def test_stop_ends_stream():
     client = FakeClient(chunks())
     Assistant(client=client).respond("hi", spoken.append, should_stop=lambda: stop["now"])
     assert spoken == ["First."]
+
+
+def test_message_log_has_timestamps():
+    database.save_message("user", "hi")
+    (role, content, stamp), = database.get_message_log(limit=1)
+    assert (role, content) == ("user", "hi") and stamp[:4].isdigit()

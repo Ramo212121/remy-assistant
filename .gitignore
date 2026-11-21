@@ -60,3 +60,6 @@ assets/aiback.mp4
 
 # ─── Logs ───
 *.log
+
+# ─── Gesture model (downloaded on first use) ───
+models/

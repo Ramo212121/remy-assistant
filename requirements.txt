@@ -3,6 +3,7 @@ flet==1.0.3
 flet-desktop==1.0.3
 faster-whisper==1.2.1
 groq==1.7.0
+mediapipe==1.2.3
 IMAPClient==4.1.0
 numpy==2.5.3
 ollama==0.6.2

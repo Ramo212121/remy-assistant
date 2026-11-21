@@ -244,6 +244,18 @@ def set_volume(level):
         return f"Error: {e}"
 
 
+def change_volume(delta):
+    """Raise or lower system volume by `delta` percentage points."""
+    try:
+        current = subprocess.run(
+            ["osascript", "-e", "output volume of (get volume settings)"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        return set_volume(int(current) + int(delta))
+    except Exception as e:
+        return f"Error: {e}"
+
+
 def mute():
     """Mute system volume."""
     try:

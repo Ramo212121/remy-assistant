@@ -3,13 +3,52 @@ import threading
 
 from src.brain.commands import is_exit_command, is_shutdown_command
 from src.config import SILENCE_TIMEOUT
+from src.hands.tools import change_volume, get_time, open_app
 from src.ears import listener
 from src.ears.listener import clear_buffer, listen, set_speaking
 from src.ears.wake_word import load_model as load_wake_model, wait_for_wake_word
-from src.mouth.speaker import load_voice, reset_interrupt, speak, wait_until_done, was_interrupted
+from src.mouth.speaker import interrupt, load_voice, reset_interrupt, speak, wait_until_done, was_interrupted
 
 # Yazılı mesaj ve sesli komut aynı anda konuşmasın
 _turn_lock = threading.Lock()
+
+# Kameradan gelen el hareketleri (src/eyes/gestures.py)
+_gesture_wake = threading.Event()
+_gesture_done = threading.Event()
+VOLUME_STEP = 10
+OPEN_CLOSE_APP = "Google Chrome"
+_last_reply = {"text": ""}
+
+
+def _say_now(text):
+    """Speak outside a conversation turn, with the mic muted so Remy doesn't hear itself."""
+    def run():
+        with _turn_lock:
+            set_speaking(True)
+            speak(text)
+            _finish_speech()
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def handle_gesture(action):
+    """Turn a gesture into the same thing a voice command or button would do."""
+    if action == "wake":            # ✋ "Hey Remy" demiş gibi
+        _gesture_wake.set()
+    elif action == "stop":          # ✊ STOP
+        interrupt()
+    elif action == "done":          # 👍 "bye" demiş gibi
+        _gesture_done.set()
+    elif action == "volume_up":     # ☝️
+        print(f"🔊 {change_volume(VOLUME_STEP)}")
+    elif action == "volume_down":   # 👎
+        print(f"🔉 {change_volume(-VOLUME_STEP)}")
+    elif action == "repeat":        # ✌️ son cevabı tekrarla
+        _say_now(_last_reply["text"] or "I haven't said anything yet.")
+    elif action == "time":          # 🤟 saati LLM'e sormadan söyle
+        _say_now(f"It's {get_time()}.")
+    elif action == "open_chrome":   # ✋→✊ avucu aç-kapa
+        print(f"🌐 {open_app(OPEN_CLOSE_APP)}")
 
 
 def preload():
@@ -41,9 +80,12 @@ def run_turn(assistant, user_text, on_sentence=None, on_tool=None):
         reset_interrupt()
         set_speaking(True)
         try:
-            return assistant.respond(
+            reply = assistant.respond(
                 user_text, handle_sentence, should_stop=was_interrupted, on_tool=on_tool
             )
+            if reply:
+                _last_reply["text"] = reply
+            return reply
         finally:
             _finish_speech()
 
@@ -60,8 +102,16 @@ def run_voice_loop(assistant, is_active=lambda: True, on_state=None, on_user=Non
     while is_active():
         # ─── DIŞ DÖNGÜ: Wake word bekle ───
         state("waiting")
-        if not wait_for_wake_word(timeout=60, should_stop=lambda: not is_active()):
+        _gesture_wake.clear()
+        woke = wait_for_wake_word(
+            timeout=60, should_stop=lambda: not is_active() or _gesture_wake.is_set()
+        )
+        if _gesture_wake.is_set():
+            print("✋ Woken by gesture")
+            woke = True
+        if not woke:
             continue
+        _gesture_done.clear()
 
         print("\n🎤 Conversation mode ON")
         state("speaking")
@@ -70,7 +120,17 @@ def run_voice_loop(assistant, is_active=lambda: True, on_state=None, on_user=Non
         # ─── İÇ DÖNGÜ: Conversation mode ───
         while is_active():
             state("listening")
-            user_input = listen(timeout=SILENCE_TIMEOUT, should_stop=lambda: not is_active())
+            user_input = listen(
+                timeout=SILENCE_TIMEOUT, should_stop=lambda: not is_active() or _gesture_done.is_set()
+            )
+
+            # 👍 → "bye" demiş gibi sohbet biter
+            if _gesture_done.is_set():
+                _gesture_done.clear()
+                print("👍 Conversation ended by gesture")
+                state("speaking")
+                _say("Okay.")
+                break
 
             # None → sessizlik timeout'u, conversation mode kapanır
             if user_input is None:
